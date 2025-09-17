@@ -18,12 +18,13 @@ void main() {
     // Wait for initialization to complete
     await tester.pumpAndSettle();
 
-    // Should show either the main content or initialization screen
-    // Look for either loading indicator or app content
-    expect(
-      find.byType(CircularProgressIndicator).or(find.text('Alist Photo')),
-      findsOneWidget,
-    );
+    // Should show either the main content or loading indicator
+    // First check for loading indicator
+    final loadingFinder = find.byType(CircularProgressIndicator);
+    final appTitleFinder = find.text('Alist Photo');
+    
+    // Must find at least one of them
+    expect(loadingFinder.evaluate().isNotEmpty || appTitleFinder.evaluate().isNotEmpty, isTrue);
   });
 
   testWidgets('App initialization completes', (WidgetTester tester) async {
@@ -34,6 +35,6 @@ void main() {
     await tester.pumpAndSettle(const Duration(seconds: 5));
 
     // After initialization, should show the main app
-    expect(find.byType(Scaffold), findsAtLeastOneWidget);
+    expect(find.byType(Scaffold), findsWidgets);
   });
 }
