@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/alist_api_client.dart';
 import '../services/log_service.dart';
 import '../pages/settings_page.dart';
@@ -123,6 +125,264 @@ class _HomePageState extends State<HomePage> {
     }
   }
   
+  void _showFileMenu(AlistFile file) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.info),
+            title: const Text('详细信息'),
+            onTap: () {
+              Navigator.pop(context);
+              _showFileInfo(file);
+            },
+          ),
+          if (!file.isDir) ...[
+            ListTile(
+              leading: const Icon(Icons.download),
+              title: const Text('下载'),
+              onTap: () {
+                Navigator.pop(context);
+                _downloadFile(file);
+              },
+            ),
+          ],
+          ListTile(
+            leading: const Icon(Icons.edit),
+            title: const Text('重命名'),
+            onTap: () {
+              Navigator.pop(context);
+              _renameFile(file);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete),
+            title: const Text('删除'),
+            onTap: () {
+              Navigator.pop(context);
+              _deleteFile(file);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFileInfo(AlistFile file) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(file.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('类型: ${file.isDir ? '文件夹' : file.isImage ? '图像' : '文件'}'),
+            const SizedBox(height: 8),
+            if (!file.isDir) ...[
+              Text('大小: ${file.formattedSize}'),
+              const SizedBox(height: 8),
+            ],
+            Text('创建时间: ${file.created.toString().split('.')[0]}'),
+            const SizedBox(height: 8),
+            Text('修改时间: ${file.modified.toString().split('.')[0]}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _downloadFile(AlistFile file) {
+    final downloadUrl = widget.apiClient.getDownloadUrl(file);
+    
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.copy),
+            title: const Text('复制下载链接'),
+            onTap: () async {
+              await Clipboard.setData(ClipboardData(text: downloadUrl));
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('下载链接已复制到剪贴板')),
+                );
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.open_in_browser),
+            title: const Text('在浏览器中打开'),
+            onTap: () async {
+              final uri = Uri.parse(downloadUrl);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+              if (mounted) {
+                Navigator.pop(context);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _renameFile(AlistFile file) {
+    final controller = TextEditingController(text: file.name);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('重命名'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: '新名称',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty && newName != file.name) {
+                Navigator.pop(context);
+                
+                final filePath = _currentPath == '/' 
+                    ? '/${file.name}' 
+                    : '$_currentPath/${file.name}';
+                
+                final success = await widget.apiClient.renameFile(filePath, newName);
+                if (success) {
+                  _loadFiles();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('重命名成功')),
+                    );
+                  }
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('重命名失败')),
+                    );
+                  }
+                }
+              }
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteFile(AlistFile file) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除 "${file.name}" 吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              
+              final success = await widget.apiClient.deleteFiles(
+                _currentPath, 
+                [file.name]
+              );
+              
+              if (success) {
+                _loadFiles();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('删除成功')),
+                  );
+                }
+              } else {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('删除失败')),
+                  );
+                }
+              }
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _createNewFolder() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('新建文件夹'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: '文件夹名称',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final folderName = controller.text.trim();
+              if (folderName.isNotEmpty) {
+                Navigator.pop(context);
+                
+                final newFolderPath = _currentPath == '/' 
+                    ? '/$folderName' 
+                    : '$_currentPath/$folderName';
+                
+                final success = await widget.apiClient.createFolder(newFolderPath);
+                if (success) {
+                  _loadFiles();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('文件夹创建成功')),
+                    );
+                  }
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('文件夹创建失败')),
+                    );
+                  }
+                }
+              }
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openPhoto(AlistFile file, int index) {
     // 获取所有图片文件
     final imageFiles = _files.where((f) => !f.isDir && f.isImage).toList();
@@ -202,6 +462,7 @@ class _HomePageState extends State<HomePage> {
     if (file.isDir) {
       return GestureDetector(
         onTap: () => _navigateToFolder(file),
+        onLongPress: () => _showFileMenu(file),
         child: Card(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -227,6 +488,7 @@ class _HomePageState extends State<HomePage> {
       
       return GestureDetector(
         onTap: () => _openPhoto(file, index),
+        onLongPress: () => _showFileMenu(file),
         child: Card(
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -300,31 +562,34 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     } else {
-      return Card(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.insert_drive_file, size: 48, color: Colors.grey),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                file.name,
-                style: const TextStyle(fontWeight: FontWeight.w500),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+      return GestureDetector(
+        onLongPress: () => _showFileMenu(file),
+        child: Card(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.insert_drive_file, size: 48, color: Colors.grey),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  file.name,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              file.formattedSize,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade600,
+              const SizedBox(height: 4),
+              Text(
+                file.formattedSize,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
@@ -348,6 +613,7 @@ class _HomePageState extends State<HomePage> {
           _openPhoto(file, index);
         }
       },
+      onLongPress: () => _showFileMenu(file),
     );
   }
   
@@ -359,6 +625,11 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add_box),
+            onPressed: _createNewFolder,
+            tooltip: '新建文件夹',
+          ),
           IconButton(
             icon: Icon(_isGridView ? Icons.list : Icons.grid_view),
             onPressed: () {

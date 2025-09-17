@@ -280,7 +280,14 @@ class AlistApiClient {
   // 获取缩略图URL
   String? getThumbnailUrl(AlistFile file) {
     if (file.thumb?.isNotEmpty == true) {
-      final thumbUrl = getFullUrl(file.thumb!);
+      String thumbUrl;
+      // 如果thumb已经是完整URL（包含http或https），直接使用
+      if (file.thumb!.startsWith('http://') || file.thumb!.startsWith('https://')) {
+        thumbUrl = file.thumb!;
+      } else {
+        // 否则拼接服务器URL
+        thumbUrl = getFullUrl(file.thumb!);
+      }
       LogService.instance.debug('Generated thumbnail URL for ${file.name}: $thumbUrl', 'AlistApiClient');
       return thumbUrl;
     }
@@ -299,7 +306,14 @@ class AlistApiClient {
   String getDownloadUrl(AlistFile file) {
     // 优先使用raw_url，如果没有则使用传统方式
     if (file.rawUrl != null && file.rawUrl!.isNotEmpty) {
-      final downloadUrl = file.rawUrl!;
+      String downloadUrl;
+      // 如果raw_url已经是完整URL，直接使用
+      if (file.rawUrl!.startsWith('http://') || file.rawUrl!.startsWith('https://')) {
+        downloadUrl = file.rawUrl!;
+      } else {
+        // 否则拼接服务器URL
+        downloadUrl = getFullUrl(file.rawUrl!);
+      }
       LogService.instance.debug('Using raw_url for ${file.name}: $downloadUrl', 'AlistApiClient');
       return downloadUrl;
     }
@@ -326,6 +340,227 @@ class AlistApiClient {
     _token = null;
     
     LogService.instance.info('Alist configuration cleared', 'AlistApiClient');
+  }
+
+  // 重命名文件
+  Future<bool> renameFile(String path, String newName) async {
+    LogService.instance.info('Renaming file: $path -> $newName', 'AlistApiClient');
+    
+    if (_token == null) {
+      final success = await login();
+      if (!success) {
+        LogService.instance.error('Login failed, cannot rename file', 'AlistApiClient');
+        return false;
+      }
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_serverUrl/api/fs/rename'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': _token!,
+        },
+        body: jsonEncode({
+          'path': path,
+          'name': newName,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['code'] == 200) {
+          LogService.instance.info('File renamed successfully', 'AlistApiClient');
+          return true;
+        } else {
+          LogService.instance.error('Rename failed: ${data['message']}', 'AlistApiClient', {
+            'code': data['code'],
+            'path': path,
+            'new_name': newName,
+          });
+        }
+      } else {
+        LogService.instance.error('Rename HTTP error: ${response.statusCode}', 'AlistApiClient', {
+          'status_code': response.statusCode,
+          'response': response.body,
+        });
+      }
+    } catch (e) {
+      LogService.instance.error('Rename exception: $e', 'AlistApiClient', {
+        'path': path,
+        'new_name': newName,
+      });
+    }
+
+    return false;
+  }
+
+  // 删除文件或文件夹
+  Future<bool> deleteFiles(String dir, List<String> names) async {
+    LogService.instance.info('Deleting files: ${names.join(', ')} from $dir', 'AlistApiClient');
+    
+    if (_token == null) {
+      final success = await login();
+      if (!success) {
+        LogService.instance.error('Login failed, cannot delete files', 'AlistApiClient');
+        return false;
+      }
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_serverUrl/api/fs/remove'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': _token!,
+        },
+        body: jsonEncode({
+          'dir': dir,
+          'names': names,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['code'] == 200) {
+          LogService.instance.info('Files deleted successfully', 'AlistApiClient');
+          return true;
+        } else {
+          LogService.instance.error('Delete failed: ${data['message']}', 'AlistApiClient', {
+            'code': data['code'],
+            'dir': dir,
+            'names': names,
+          });
+        }
+      } else {
+        LogService.instance.error('Delete HTTP error: ${response.statusCode}', 'AlistApiClient', {
+          'status_code': response.statusCode,
+          'response': response.body,
+        });
+      }
+    } catch (e) {
+      LogService.instance.error('Delete exception: $e', 'AlistApiClient', {
+        'dir': dir,
+        'names': names,
+      });
+    }
+
+    return false;
+  }
+
+  // 创建文件夹
+  Future<bool> createFolder(String path) async {
+    LogService.instance.info('Creating folder: $path', 'AlistApiClient');
+    
+    if (_token == null) {
+      final success = await login();
+      if (!success) {
+        LogService.instance.error('Login failed, cannot create folder', 'AlistApiClient');
+        return false;
+      }
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_serverUrl/api/fs/mkdir'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': _token!,
+        },
+        body: jsonEncode({
+          'path': path,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['code'] == 200) {
+          LogService.instance.info('Folder created successfully', 'AlistApiClient');
+          return true;
+        } else {
+          LogService.instance.error('Create folder failed: ${data['message']}', 'AlistApiClient', {
+            'code': data['code'],
+            'path': path,
+          });
+        }
+      } else {
+        LogService.instance.error('Create folder HTTP error: ${response.statusCode}', 'AlistApiClient', {
+          'status_code': response.statusCode,
+          'response': response.body,
+        });
+      }
+    } catch (e) {
+      LogService.instance.error('Create folder exception: $e', 'AlistApiClient', {
+        'path': path,
+      });
+    }
+
+    return false;
+  }
+
+  // 搜索文件
+  Future<List<AlistFile>?> searchFiles({
+    required String parent,
+    required String keywords,
+    int scope = 0, // 0-全部 1-文件夹 2-文件
+    int page = 1,
+    int perPage = 30,
+  }) async {
+    LogService.instance.debug('Searching files: keywords="$keywords", scope=$scope', 'AlistApiClient');
+    
+    if (_token == null) {
+      final success = await login();
+      if (!success) {
+        LogService.instance.error('Login failed, cannot search files', 'AlistApiClient');
+        return null;
+      }
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_serverUrl/api/fs/search'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': _token!,
+        },
+        body: jsonEncode({
+          'parent': parent,
+          'keywords': keywords,
+          'scope': scope,
+          'page': page,
+          'per_page': perPage,
+          'password': '',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['code'] == 200) {
+          final content = data['data']['content'] as List?;
+          if (content != null) {
+            final files = content.map((item) => AlistFile.fromJson(item)).toList();
+            LogService.instance.info('Found ${files.length} files matching "$keywords"', 'AlistApiClient');
+            return files;
+          }
+        } else {
+          LogService.instance.error('Search failed: ${data['message']}', 'AlistApiClient', {
+            'code': data['code'],
+            'keywords': keywords,
+          });
+        }
+      } else {
+        LogService.instance.error('Search HTTP error: ${response.statusCode}', 'AlistApiClient', {
+          'status_code': response.statusCode,
+          'response': response.body,
+        });
+      }
+    } catch (e) {
+      LogService.instance.error('Search exception: $e', 'AlistApiClient', {
+        'keywords': keywords,
+      });
+    }
+
+    return null;
   }
   
   // Getter 方法
