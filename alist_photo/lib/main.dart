@@ -1,15 +1,53 @@
 import "package:flutter/material.dart";
 import "services/alist_api_client.dart";
+import "services/log_service.dart";
 import "pages/home_page.dart";
 
-void main() {
+void main() async {
+  // 确保Flutter绑定已初始化
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // 初始化日志服务
+  await LogService.instance.initialize();
+  LogService.instance.info('Alist Photo app starting', 'Main');
+  
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
-  static final AlistApiClient _apiClient = AlistApiClient();
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final AlistApiClient _apiClient = AlistApiClient();
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeApp();
+  }
+
+  Future<void> _initializeApp() async {
+    try {
+      LogService.instance.info('Initializing Alist API client', 'Main');
+      await _apiClient.initialize();
+      
+      setState(() {
+        _isInitialized = true;
+      });
+      
+      LogService.instance.info('App initialization completed', 'Main');
+    } catch (e) {
+      LogService.instance.error('App initialization failed: $e', 'Main');
+      setState(() {
+        _isInitialized = true; // 继续加载，即使初始化失败
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +61,20 @@ class MyApp extends StatelessWidget {
           centerTitle: true,
         ),
       ),
-      home: HomePage(apiClient: _apiClient),
+      home: _isInitialized 
+          ? HomePage(apiClient: _apiClient)
+          : const Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('正在初始化...'),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 }

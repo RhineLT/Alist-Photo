@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/alist_api_client.dart';
+import '../services/log_service.dart';
 import '../pages/settings_page.dart';
 import '../pages/photo_viewer_page.dart';
 
@@ -24,20 +25,29 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    LogService.instance.info('Home page initialized', 'HomePage');
     _checkConfigAndLoad();
   }
   
   Future<void> _checkConfigAndLoad() async {
-    await widget.apiClient.initialize();
+    LogService.instance.info('Checking configuration and loading files', 'HomePage');
+    
     if (!widget.apiClient.isConfigured) {
+      LogService.instance.warning('Alist not configured, opening settings', 'HomePage');
       _openSettings();
     } else {
+      LogService.instance.info('Configuration valid, loading files', 'HomePage');
       _loadFiles();
     }
   }
   
   Future<void> _loadFiles() async {
-    if (!widget.apiClient.isConfigured) return;
+    if (!widget.apiClient.isConfigured) {
+      LogService.instance.warning('Cannot load files: Alist not configured', 'HomePage');
+      return;
+    }
+    
+    LogService.instance.info('Loading files from path: $_currentPath', 'HomePage');
     
     setState(() {
       _isLoading = true;
@@ -46,10 +56,15 @@ class _HomePageState extends State<HomePage> {
     try {
       final files = await widget.apiClient.getFileList(_currentPath);
       if (files != null) {
+        LogService.instance.info('Successfully loaded ${files.length} files', 'HomePage', {
+          'path': _currentPath,
+          'file_count': files.length,
+        });
         setState(() {
           _files = files;
         });
       } else {
+        LogService.instance.error('Failed to load files from path: $_currentPath', 'HomePage');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('加载文件失败，请检查网络连接和服务器设置')),
@@ -57,6 +72,9 @@ class _HomePageState extends State<HomePage> {
         }
       }
     } catch (e) {
+      LogService.instance.error('Exception while loading files: $e', 'HomePage', {
+        'path': _currentPath,
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('加载文件失败：$e')),

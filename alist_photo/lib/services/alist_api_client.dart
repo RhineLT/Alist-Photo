@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'log_service.dart';
 
 class AlistApiClient {
   static const String _serverUrlKey = 'server_url';
@@ -16,11 +17,19 @@ class AlistApiClient {
   
   // 初始化客户端，从存储中加载配置
   Future<void> initialize() async {
+    LogService.instance.info('Initializing Alist API client', 'AlistApiClient');
+    
     final prefs = await SharedPreferences.getInstance();
     _serverUrl = prefs.getString(_serverUrlKey);
     _username = prefs.getString(_usernameKey);
     _password = prefs.getString(_passwordKey);
     _token = prefs.getString(_tokenKey);
+    
+    if (isConfigured) {
+      LogService.instance.info('Alist configuration loaded: ${_serverUrl}', 'AlistApiClient');
+    } else {
+      LogService.instance.warning('Alist configuration incomplete', 'AlistApiClient');
+    }
   }
   
   // 保存服务器配置
@@ -29,6 +38,8 @@ class AlistApiClient {
     required String username,
     required String password,
   }) async {
+    LogService.instance.info('Saving Alist configuration', 'AlistApiClient');
+    
     final prefs = await SharedPreferences.getInstance();
     
     // 确保 URL 格式正确
@@ -46,6 +57,11 @@ class AlistApiClient {
     await prefs.setString(_serverUrlKey, serverUrl);
     await prefs.setString(_usernameKey, username);
     await prefs.setString(_passwordKey, password);
+    
+    LogService.instance.info('Alist configuration saved', 'AlistApiClient', {
+      'server_url': serverUrl,
+      'username': username,
+    });
   }
   
   // 检查是否已配置
@@ -59,11 +75,18 @@ class AlistApiClient {
   
   // 登录获取 token
   Future<bool> login() async {
-    if (!isConfigured) return false;
+    if (!isConfigured) {
+      LogService.instance.warning('Cannot login: configuration incomplete', 'AlistApiClient');
+      return false;
+    }
+    
+    LogService.instance.info('Attempting to login to Alist server', 'AlistApiClient');
     
     try {
       // 根据Alist API文档，需要在密码后添加后缀再进行SHA256
       final hashedPassword = sha256.convert(utf8.encode('$_password-https://github.com/alist-org/alist')).toString();
+      
+      LogService.instance.debug('Sending login request to: $_serverUrl/api/auth/login/hash', 'AlistApiClient');
       
       final response = await http.post(
         Uri.parse('$_serverUrl/api/auth/login/hash'),
@@ -74,17 +97,31 @@ class AlistApiClient {
         }),
       );
       
+      LogService.instance.debug('Login response status: ${response.statusCode}', 'AlistApiClient');
+      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['code'] == 200) {
           _token = data['data']['token'];
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_tokenKey, _token!);
+          
+          LogService.instance.info('Login successful', 'AlistApiClient');
           return true;
+        } else {
+          LogService.instance.error('Login failed: ${data['message'] ?? 'Unknown error'}', 'AlistApiClient', {
+            'code': data['code'],
+            'response': response.body,
+          });
         }
+      } else {
+        LogService.instance.error('Login failed: HTTP ${response.statusCode}', 'AlistApiClient', {
+          'status_code': response.statusCode,
+          'response': response.body,
+        });
       }
     } catch (e) {
-      // Handle login error silently or log to analytics  
+      LogService.instance.error('Login exception: $e', 'AlistApiClient');
     }
     
     return false;
@@ -92,9 +129,15 @@ class AlistApiClient {
   
   // 获取文件列表
   Future<List<AlistFile>?> getFileList(String path) async {
+    LogService.instance.debug('Fetching file list for path: $path', 'AlistApiClient');
+    
     if (_token == null) {
+      LogService.instance.info('Token not available, attempting login', 'AlistApiClient');
       final success = await login();
-      if (!success) return null;
+      if (!success) {
+        LogService.instance.error('Login failed, cannot fetch file list', 'AlistApiClient');
+        return null;
+      }
     }
     
     try {
@@ -113,17 +156,32 @@ class AlistApiClient {
         }),
       );
       
+      LogService.instance.debug('File list response status: ${response.statusCode}', 'AlistApiClient');
+      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['code'] == 200) {
           final content = data['data']['content'] as List?;
           if (content != null) {
-            return content.map((item) => AlistFile.fromJson(item)).toList();
+            final files = content.map((item) => AlistFile.fromJson(item)).toList();
+            LogService.instance.info('Retrieved ${files.length} files from path: $path', 'AlistApiClient');
+            return files;
           }
+        } else {
+          LogService.instance.error('File list API error: ${data['message']}', 'AlistApiClient', {
+            'code': data['code'],
+            'path': path,
+          });
         }
+      } else {
+        LogService.instance.error('File list HTTP error: ${response.statusCode}', 'AlistApiClient', {
+          'status_code': response.statusCode,
+          'path': path,
+          'response': response.body,
+        });
       }
     } catch (e) {
-      // Handle get file list error silently or log to analytics
+      LogService.instance.error('File list exception: $e', 'AlistApiClient', {'path': path});
     }
     
     return null;
@@ -131,7 +189,12 @@ class AlistApiClient {
   
   // 检查token是否有效
   Future<bool> checkToken() async {
-    if (_token == null) return false;
+    if (_token == null) {
+      LogService.instance.debug('No token available for validation', 'AlistApiClient');
+      return false;
+    }
+    
+    LogService.instance.debug('Validating token', 'AlistApiClient');
     
     try {
       final response = await http.post(
@@ -149,17 +212,25 @@ class AlistApiClient {
         }),
       );
       
-      return response.statusCode == 200;
+      final isValid = response.statusCode == 200;
+      LogService.instance.debug('Token validation result: $isValid', 'AlistApiClient');
+      return isValid;
     } catch (e) {
+      LogService.instance.warning('Token validation failed: $e', 'AlistApiClient');
       return false;
     }
   }
   
   // 获取单个文件信息（包含下载链接）
   Future<AlistFile?> getFile(String path) async {
+    LogService.instance.debug('Fetching file info for: $path', 'AlistApiClient');
+    
     if (_token == null) {
       final success = await login();
-      if (!success) return null;
+      if (!success) {
+        LogService.instance.error('Login failed, cannot fetch file info', 'AlistApiClient');
+        return null;
+      }
     }
     
     try {
@@ -178,11 +249,22 @@ class AlistApiClient {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['code'] == 200) {
+          LogService.instance.debug('File info retrieved successfully', 'AlistApiClient');
           return AlistFile.fromJson(data['data']);
+        } else {
+          LogService.instance.error('File info API error: ${data['message']}', 'AlistApiClient', {
+            'code': data['code'],
+            'path': path,
+          });
         }
+      } else {
+        LogService.instance.error('File info HTTP error: ${response.statusCode}', 'AlistApiClient', {
+          'status_code': response.statusCode,
+          'path': path,
+        });
       }
     } catch (e) {
-      // Handle get file error silently or log to analytics
+      LogService.instance.error('File info exception: $e', 'AlistApiClient', {'path': path});
     }
     
     return null;
@@ -190,29 +272,48 @@ class AlistApiClient {
   
   // 获取完整的文件URL（包含服务器地址）
   String getFullUrl(String path) {
-    return '$_serverUrl$path';
+    final fullUrl = '$_serverUrl$path';
+    LogService.instance.debug('Generated full URL: $fullUrl', 'AlistApiClient');
+    return fullUrl;
   }
   
   // 获取缩略图URL
   String? getThumbnailUrl(AlistFile file) {
     if (file.thumb?.isNotEmpty == true) {
-      return getFullUrl(file.thumb!);
+      final thumbUrl = getFullUrl(file.thumb!);
+      LogService.instance.debug('Generated thumbnail URL for ${file.name}: $thumbUrl', 'AlistApiClient');
+      return thumbUrl;
     }
+    
+    // 如果没有缩略图，对于图片文件尝试使用原图作为缩略图
+    if (file.isImage) {
+      final imageUrl = getDownloadUrl(file);
+      LogService.instance.debug('Using image URL as thumbnail for ${file.name}: $imageUrl', 'AlistApiClient');
+      return imageUrl;
+    }
+    
+    LogService.instance.debug('No thumbnail available for ${file.name}', 'AlistApiClient');
     return null;
   }
-  
   // 获取下载URL
   String getDownloadUrl(AlistFile file) {
     // 优先使用raw_url，如果没有则使用传统方式
     if (file.rawUrl != null && file.rawUrl!.isNotEmpty) {
-      return file.rawUrl!;
+      final downloadUrl = file.rawUrl!;
+      LogService.instance.debug('Using raw_url for ${file.name}: $downloadUrl', 'AlistApiClient');
+      return downloadUrl;
     }
+    
     // 后备方案：使用/d路径
-    return '$_serverUrl/d${file.path}/${file.name}';
+    final downloadUrl = '$_serverUrl/d${file.path}/${file.name}';
+    LogService.instance.debug('Using fallback download URL for ${file.name}: $downloadUrl', 'AlistApiClient');
+    return downloadUrl;
   }
   
   // 清除配置和 token
   Future<void> clearConfig() async {
+    LogService.instance.info('Clearing Alist configuration', 'AlistApiClient');
+    
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_serverUrlKey);
     await prefs.remove(_usernameKey);
@@ -223,6 +324,8 @@ class AlistApiClient {
     _username = null;
     _password = null;
     _token = null;
+    
+    LogService.instance.info('Alist configuration cleared', 'AlistApiClient');
   }
   
   // Getter 方法
