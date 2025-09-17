@@ -11,20 +11,35 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:alist_photo/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('App loads without error', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify that app title is present
+    expect(find.text('Alist Photo'), findsOneWidget);
+    
+    // Verify that settings button is present
+    expect(find.byIcon(Icons.settings), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Wait for any async operations to complete
+    await tester.pumpAndSettle();
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('Settings page can be opened', (WidgetTester tester) async {
+    // Build our app and trigger a frame.
+    await tester.pumpWidget(const MyApp());
+    
+    // Wait for the app to load
+    await tester.pumpAndSettle();
+
+    // Tap the settings icon
+    await tester.tap(find.byIcon(Icons.settings));
+    await tester.pumpAndSettle();
+
+    // Verify that settings page opened
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('服务器地址'), findsOneWidget);
+    expect(find.text('用户名'), findsOneWidget);
+    expect(find.text('密码'), findsOneWidget);
   });
 }
