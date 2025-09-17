@@ -84,7 +84,7 @@ class AlistApiClient {
         }
       }
     } catch (e) {
-      print('Login error: $e');
+      // Handle login error silently or log to analytics  
     }
     
     return false;
@@ -123,7 +123,7 @@ class AlistApiClient {
         }
       }
     } catch (e) {
-      print('Get file list error: $e');
+      // Handle get file list error silently or log to analytics
     }
     
     return null;
@@ -182,7 +182,7 @@ class AlistApiClient {
         }
       }
     } catch (e) {
-      print('Get file error: $e');
+      // Handle get file error silently or log to analytics
     }
     
     return null;

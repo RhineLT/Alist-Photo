@@ -17,7 +17,7 @@ class PhotoViewerPage extends StatefulWidget {
   });
   
   @override
-  _PhotoViewerPageState createState() => _PhotoViewerPageState();
+  State<PhotoViewerPage> createState() => _PhotoViewerPageState();
 }
 
 class _PhotoViewerPageState extends State<PhotoViewerPage> {
@@ -91,24 +91,24 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                     child: Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
+                        children: const [
+                          Icon(
                             Icons.broken_image,
                             size: 64,
                             color: Colors.white54,
                           ),
-                          const SizedBox(height: 16),
+                          SizedBox(height: 16),
                           Text(
                             '加载失败',
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: Colors.white54,
                               fontSize: 16,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          SizedBox(height: 8),
                           Text(
                             file.name,
-                            style: TextStyle(
+                            style: const TextStyle(
                               color: Colors.white54,
                               fontSize: 12,
                             ),

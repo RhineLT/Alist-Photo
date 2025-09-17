@@ -11,7 +11,7 @@ class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.apiClient});
   
   @override
-  _HomePageState createState() => _HomePageState();
+  State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
@@ -50,14 +50,18 @@ class _HomePageState extends State<HomePage> {
           _files = files;
         });
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('加载文件失败，请检查网络连接和服务器设置')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('加载文件失败，请检查网络连接和服务器设置')),
+          );
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('加载文件失败：$e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('加载文件失败：$e')),
+        );
+      }
     } finally {
       setState(() {
         _isLoading = false;
@@ -65,7 +69,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
   
-  void _openSettings() async {
+  Future<void> _openSettings() async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -73,7 +77,7 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     
-    if (result == true) {
+    if (result == true && mounted) {
       _loadFiles();
     }
   }

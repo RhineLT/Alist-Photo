@@ -7,7 +7,7 @@ class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.apiClient});
   
   @override
-  _SettingsPageState createState() => _SettingsPageState();
+  State<SettingsPage> createState() => _SettingsPageState();
 }
 
 class _SettingsPageState extends State<SettingsPage> {
@@ -54,7 +54,7 @@ class _SettingsPageState extends State<SettingsPage> {
       // 测试连接
       final success = await widget.apiClient.login();
       
-      if (success) {
+      if (success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('设置保存成功，连接测试通过'),
@@ -62,7 +62,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         );
         Navigator.of(context).pop(true);
-      } else {
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('连接失败，请检查服务器地址和账户信息'),
@@ -71,12 +71,14 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('保存失败：$e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('保存失败：$e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
       setState(() {
         _isLoading = false;
@@ -103,7 +105,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     
-    if (confirm == true) {
+    if (confirm == true && mounted) {
       await widget.apiClient.clearConfig();
       _serverUrlController.clear();
       _usernameController.clear();
