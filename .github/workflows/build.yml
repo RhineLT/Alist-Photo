@@ -17,7 +17,7 @@ jobs:
     - name: Update version to current date
       run: |
         VERSION_DATE=$(date '+%Y%m%d')
-        sed -i "s/version: [0-9]\+\+[0-9]/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
+        sed -i "s/version: .*+.*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
         echo "Updated version to: ${VERSION_DATE}+1"
         cat alist_photo/pubspec.yaml | grep "version:"
     
@@ -50,7 +50,7 @@ jobs:
     - name: Update version to current date
       run: |
         VERSION_DATE=$(date '+%Y%m%d')
-        sed -i "s/version: [0-9]\+\+[0-9]/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
+        sed -i "s/version: .*+.*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
         echo "Updated version to: ${VERSION_DATE}+1"
     
     - name: Setup Java
@@ -100,7 +100,7 @@ jobs:
     - name: Update version to current date
       run: |
         VERSION_DATE=$(date '+%Y%m%d')
-        sed -i '' "s/version: [0-9]*+[0-9]*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
+        sed -i '' "s/version: .*+.*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
         echo "Updated version to: ${VERSION_DATE}+1"
     
     - name: Setup Flutter
@@ -149,7 +149,7 @@ jobs:
       - name: Update version to current date
         run: |
           VERSION_DATE=$(date '+%Y%m%d')
-          sed -i "s/version: [0-9]\+\+[0-9]/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
+          sed -i "s/version: .*+.*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
           echo "Updated version to: ${VERSION_DATE}+1"
         
       - name: Get version
