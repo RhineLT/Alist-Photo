@@ -163,7 +163,26 @@ class AlistApiClient {
         if (data['code'] == 200) {
           final content = data['data']['content'] as List?;
           if (content != null) {
-            final files = content.map((item) => AlistFile.fromJson(item)).toList();
+            final files = content.map((item) {
+              // 确保每个文件都有正确的路径信息
+              final file = AlistFile.fromJson(item);
+              // 如果文件的path字段为空，使用当前目录路径
+              if (file.path.isEmpty) {
+                return AlistFile(
+                  name: file.name,
+                  size: file.size,
+                  isDir: file.isDir,
+                  modified: file.modified,
+                  created: file.created,
+                  thumb: file.thumb,
+                  sign: file.sign,
+                  type: file.type,
+                  path: path, // 使用当前查询的路径
+                  rawUrl: file.rawUrl,
+                );
+              }
+              return file;
+            }).toList();
             LogService.instance.info('Retrieved ${files.length} files from path: $path', 'AlistApiClient');
             return files;
           }
@@ -294,7 +313,7 @@ class AlistApiClient {
     
     // 如果没有缩略图，对于图片文件尝试使用原图作为缩略图
     if (file.isImage) {
-      final imageUrl = getDownloadUrl(file);
+      final imageUrl = getDownloadUrlSync(file);
       LogService.instance.debug('Using image URL as thumbnail for ${file.name}: $imageUrl', 'AlistApiClient');
       return imageUrl;
     }
@@ -302,24 +321,60 @@ class AlistApiClient {
     LogService.instance.debug('No thumbnail available for ${file.name}', 'AlistApiClient');
     return null;
   }
-  // 获取下载URL
-  String getDownloadUrl(AlistFile file) {
-    // 优先使用raw_url，如果没有则使用传统方式
+  // 获取下载URL（增强版本，通过API获取正确的raw_url）
+  Future<String> getDownloadUrl(AlistFile file) async {
+    LogService.instance.debug('Getting download URL for ${file.name}', 'AlistApiClient');
+    
+    // 首先检查文件是否已经有raw_url
     if (file.rawUrl != null && file.rawUrl!.isNotEmpty) {
       String downloadUrl;
-      // 如果raw_url已经是完整URL，直接使用
       if (file.rawUrl!.startsWith('http://') || file.rawUrl!.startsWith('https://')) {
         downloadUrl = file.rawUrl!;
       } else {
-        // 否则拼接服务器URL
+        downloadUrl = getFullUrl(file.rawUrl!);
+      }
+      LogService.instance.debug('Using existing raw_url for ${file.name}: $downloadUrl', 'AlistApiClient');
+      return downloadUrl;
+    }
+    
+    // 如果没有raw_url，通过API获取完整文件信息
+    final fullPath = file.path.isEmpty ? '/${file.name}' : '${file.path}/${file.name}';
+    LogService.instance.debug('Fetching file details for complete URL: $fullPath', 'AlistApiClient');
+    
+    final fileInfo = await getFile(fullPath);
+    if (fileInfo?.rawUrl != null && fileInfo!.rawUrl!.isNotEmpty) {
+      String downloadUrl;
+      if (fileInfo.rawUrl!.startsWith('http://') || fileInfo.rawUrl!.startsWith('https://')) {
+        downloadUrl = fileInfo.rawUrl!;
+      } else {
+        downloadUrl = getFullUrl(fileInfo.rawUrl!);
+      }
+      LogService.instance.debug('Retrieved raw_url via API for ${file.name}: $downloadUrl', 'AlistApiClient');
+      return downloadUrl;
+    }
+    
+    // 最后的后备方案：使用/d路径
+    final fallbackUrl = '$_serverUrl/d$fullPath';
+    LogService.instance.warning('Using fallback download URL for ${file.name}: $fallbackUrl', 'AlistApiClient');
+    return fallbackUrl;
+  }
+  
+  // 获取同步下载URL（用于UI显示，不进行API调用）
+  String getDownloadUrlSync(AlistFile file) {
+    if (file.rawUrl != null && file.rawUrl!.isNotEmpty) {
+      String downloadUrl;
+      if (file.rawUrl!.startsWith('http://') || file.rawUrl!.startsWith('https://')) {
+        downloadUrl = file.rawUrl!;
+      } else {
         downloadUrl = getFullUrl(file.rawUrl!);
       }
       LogService.instance.debug('Using raw_url for ${file.name}: $downloadUrl', 'AlistApiClient');
       return downloadUrl;
     }
     
-    // 后备方案：使用/d路径
-    final downloadUrl = '$_serverUrl/d${file.path}/${file.name}';
+    // 后备方案：使用/d路径，包含完整路径
+    final fullPath = file.path.isEmpty ? '/${file.name}' : '${file.path}/${file.name}';
+    final downloadUrl = '$_serverUrl/d$fullPath';
     LogService.instance.debug('Using fallback download URL for ${file.name}: $downloadUrl', 'AlistApiClient');
     return downloadUrl;
   }

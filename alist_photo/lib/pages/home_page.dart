@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/alist_api_client.dart';
 import '../services/log_service.dart';
+import '../services/file_download_service.dart';
 import '../pages/settings_page.dart';
 import '../pages/photo_viewer_page.dart';
 
@@ -200,9 +201,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _downloadFile(AlistFile file) {
-    final downloadUrl = widget.apiClient.getDownloadUrl(file);
-    
+  void _downloadFile(AlistFile file) async {
     showModalBottomSheet(
       context: context,
       builder: (context) => Column(
@@ -212,6 +211,7 @@ class _HomePageState extends State<HomePage> {
             leading: const Icon(Icons.copy),
             title: const Text('复制下载链接'),
             onTap: () async {
+              final downloadUrl = await widget.apiClient.getDownloadUrl(file);
               await Clipboard.setData(ClipboardData(text: downloadUrl));
               if (mounted) {
                 Navigator.pop(context);
@@ -225,6 +225,7 @@ class _HomePageState extends State<HomePage> {
             leading: const Icon(Icons.open_in_browser),
             title: const Text('在浏览器中打开'),
             onTap: () async {
+              final downloadUrl = await widget.apiClient.getDownloadUrl(file);
               final uri = Uri.parse(downloadUrl);
               if (await canLaunchUrl(uri)) {
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -234,9 +235,147 @@ class _HomePageState extends State<HomePage> {
               }
             },
           ),
+          ListTile(
+            leading: const Icon(Icons.download),
+            title: const Text('下载到本地'),
+            onTap: () async {
+              Navigator.pop(context);
+              await _downloadFileToLocal(file);
+            },
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _downloadFileToLocal(AlistFile file) async {
+    try {
+      // 显示下载进度对话框
+      bool isDownloading = true;
+      double progress = 0.0;
+      String? downloadPath;
+      
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Text('下载文件'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('正在下载: ${file.name}'),
+                const SizedBox(height: 16),
+                if (isDownloading) ...[
+                  LinearProgressIndicator(value: progress > 0 ? progress : null),
+                  const SizedBox(height: 8),
+                  Text('${(progress * 100).toStringAsFixed(1)}%'),
+                ] else ...[
+                  const Icon(Icons.check_circle, color: Colors.green, size: 48),
+                  const SizedBox(height: 8),
+                  const Text('下载完成！'),
+                  if (downloadPath != null) Text('保存至: $downloadPath'),
+                ],
+              ],
+            ),
+            actions: [
+              if (!isDownloading) ...[
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('确定'),
+                ),
+              ] else ...[
+                TextButton(
+                  onPressed: () {
+                    // TODO: 实现取消下载功能
+                    Navigator.pop(context);
+                  },
+                  child: const Text('取消'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+
+      // 获取下载URL
+      LogService.instance.info('Getting download URL for file: ${file.name}', 'HomePage');
+      final downloadUrl = await widget.apiClient.getDownloadUrl(file);
+      
+      // 开始下载
+      LogService.instance.info('Starting local download', 'HomePage', {
+        'file_name': file.name,
+        'download_url': downloadUrl,
+      });
+      
+      final downloadService = FileDownloadService.instance;
+      final filePath = await downloadService.downloadFile(
+        url: downloadUrl,
+        fileName: file.name,
+        onProgress: (received, total) {
+          if (total > 0) {
+            final newProgress = received / total;
+            if ((newProgress - progress).abs() > 0.01) { // 只在进度变化超过1%时更新UI
+              progress = newProgress;
+              if (context.mounted) {
+                // 触发对话框重建
+                (context as Element).markNeedsBuild();
+              }
+            }
+          }
+        },
+      );
+
+      // 更新下载状态
+      isDownloading = false;
+      downloadPath = filePath;
+      
+      if (filePath != null) {
+        LogService.instance.info('File downloaded successfully', 'HomePage', {
+          'file_name': file.name,
+          'local_path': filePath,
+        });
+        
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('文件下载完成: ${file.name}'),
+              action: SnackBarAction(
+                label: '查看',
+                onPressed: () {
+                  // TODO: 打开文件管理器或查看文件
+                },
+              ),
+            ),
+          );
+        }
+      } else {
+        LogService.instance.error('File download failed', 'HomePage', {
+          'file_name': file.name,
+        });
+        
+        if (context.mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('文件下载失败: ${file.name}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      LogService.instance.error('Download error: $e', 'HomePage');
+      if (context.mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('下载出错: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _renameFile(AlistFile file) {

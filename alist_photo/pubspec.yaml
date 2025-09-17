@@ -55,6 +55,8 @@ dependencies:
   # Sharing and file operations
   share_plus: ^10.1.4
   url_launcher: ^6.3.1
+  permission_handler: ^11.3.1
+  device_info_plus: ^11.1.0
   
   # State management
   provider: ^6.1.2
