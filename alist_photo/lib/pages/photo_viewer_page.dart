@@ -1,13 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
-import 'package                          const Text(
-                            '加载失败',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),iew/photo_view_gallery.dart';
+import 'package:photo_view/photo_view_gallery.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/alist_api_client.dart';
 
@@ -98,13 +91,13 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                     child: Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
+                        children: const [
+                          Icon(
                             Icons.broken_image,
                             size: 64,
                             color: Colors.white54,
                           ),
-                          const SizedBox(height: 16),
+                          SizedBox(height: 16),
                           Text(
                             '加载失败',
                             style: const TextStyle(
