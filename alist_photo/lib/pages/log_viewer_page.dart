@@ -134,7 +134,6 @@ class _LogViewerPageState extends State<LogViewerPage> {
                 child: ListTile(
                   leading: Icon(Icons.clear_all),
                   title: Text('清除日志'),
-                  dense: true,
                 ),
               ),
               const PopupMenuItem(
@@ -142,7 +141,6 @@ class _LogViewerPageState extends State<LogViewerPage> {
                 child: ListTile(
                   leading: Icon(Icons.share),
                   title: Text('导出日志'),
-                  dense: true,
                 ),
               ),
             ],

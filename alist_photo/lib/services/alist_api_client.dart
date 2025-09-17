@@ -26,7 +26,7 @@ class AlistApiClient {
     _token = prefs.getString(_tokenKey);
     
     if (isConfigured) {
-      LogService.instance.info('Alist configuration loaded: ${_serverUrl}', 'AlistApiClient');
+      LogService.instance.info('Alist configuration loaded: $_serverUrl', 'AlistApiClient');
     } else {
       LogService.instance.warning('Alist configuration incomplete', 'AlistApiClient');
     }

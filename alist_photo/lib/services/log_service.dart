@@ -1,7 +1,5 @@
 import 'dart:io';
-import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 enum LogLevel {
   debug,
@@ -76,7 +74,7 @@ class LogService {
 
   final List<LogEntry> _logs = [];
   final int _maxLogs = 1000; // 最多保存1000条日志
-  bool _enableFileLogging = true;
+  final bool _enableFileLogging = true;
   File? _logFile;
 
   List<LogEntry> get logs => List.unmodifiable(_logs);

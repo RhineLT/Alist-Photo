@@ -251,7 +251,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: ListTile(
                   leading: Icon(Icons.clear_all),
                   title: Text('清除设置'),
-                  dense: true,
                 ),
               ),
             ],
@@ -448,7 +447,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 16),
             ListTile(
-              leading: const Icon(Icons.pie_chart_outlined),
+              leading: const Icon(Icons.pie_chart),
               title: const Text('缓存使用情况'),
               subtitle: Text(_cacheUsage),
               trailing: IconButton(
