@@ -91,21 +91,21 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                     child: Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(
+                        children: [
+                          const Icon(
                             Icons.broken_image,
                             size: 64,
                             color: Colors.white54,
                           ),
-                          SizedBox(height: 16),
-                          Text(
+                          const SizedBox(height: 16),
+                          const Text(
                             '加载失败',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Colors.white54,
                               fontSize: 16,
                             ),
                           ),
-                          SizedBox(height: 8),
+                          const SizedBox(height: 8),
                           Text(
                             file.name,
                             style: const TextStyle(
