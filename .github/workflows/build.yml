@@ -118,101 +118,51 @@ jobs:
       continue-on-error: true
 
   create-release:
-    name: Create Release
+    if: github.ref == 'refs/heads/main'
     needs: [build-android, build-ios]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Get version
-      id: version
-      run: |
-        VERSION=$(grep "version:" alist_photo/pubspec.yaml | cut -d " " -f2 | tr -d '\r')
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "tag=v$VERSION-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-    
-    - name: Download Android APK
-      uses: actions/download-artifact@v4
-      with:
-        name: android-apk
-        path: ./artifacts/
-    
-    - name: Download Android AAB
-      uses: actions/download-artifact@v4
-      with:
-        name: android-aab
-        path: ./artifacts/
-    
-    - name: Download iOS App
-      uses: actions/download-artifact@v4
-      with:
-        name: ios-app
-        path: ./artifacts/
-      continue-on-error: true
-    
-    - name: Create Release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ steps.version.outputs.tag }}
-        name: Alist Photo ${{ steps.version.outputs.version }}
-        body: |
-          # Alist Photo Release ${{ steps.version.outputs.version }}
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep 'version:' alist_photo/pubspec.yaml | cut -d ' ' -f 2 | tr -d '\r')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
           
-          ## 🚀 Features
-          - 📱 跨平台支持 Android 13+ 和 iOS 16+
-          - 🖼️ 支持 Alist 服务器图片浏览
-          - 📁 文件夹导航和浏览
-          - 🔍 图片缩略图平铺显示
-          - 👁️ 全屏图片查看器，支持缩放和滑动
-          - ⚙️ 服务器配置管理
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: ./artifacts/
           
-          ## 📱 下载说明
+      - name: Download Android AAB
+        uses: actions/download-artifact@v4
+        with:
+          name: android-aab
+          path: ./artifacts/
           
-          ### Android 用户
-          - **app-release.apk**: 推荐下载，直接安装使用
-          - **app-release.aab**: 适用于 Google Play Store 发布
-          
-          ### iOS 用户
-          - iOS 应用需要开发者证书签名，目前仅提供未签名版本
-          - 可使用 Xcode 或第三方工具进行签名后安装
-          
-          ## 🛠️ 使用方法
-          
-          1. **安装应用**
-             - Android: 下载 APK 并安装（需要允许未知来源）
-             - iOS: 需要签名后通过 TestFlight 或其他方式安装
-          
-          2. **配置服务器**
-             - 打开应用后点击右上角设置按钮
-             - 输入 Alist 服务器地址 (如: http://192.168.1.100:5244)
-             - 输入有效的用户名和密码
-             - 点击"保存并测试连接"
-          
-          3. **开始使用**
-             - 配置成功后返回主界面
-             - 浏览文件夹和图片
-             - 点击图片进入全屏查看模式
-          
-          ## 📋 系统要求
-          - **Android**: Android 13 (API 33) 或更高版本
-          - **iOS**: iOS 16.0 或更高版本
-          - **网络**: 需要能够访问 Alist 服务器的网络环境
-          
-          ## 🔧 技术信息
-          - 基于 Flutter 框架开发
-          - 支持 HTTP 和 HTTPS 协议
-          - 使用 Alist API v3 规范
-          - 支持缩略图和原图加载
-          
-          ---
-          
-          **构建信息**: ${{ steps.version.outputs.tag }}
-          **构建时间**: $(date +'%Y-%m-%d %H:%M:%S UTC')
-        files: |
-          artifacts/app-release.apk
-          artifacts/app-release.aab
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download iOS App
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-app
+          path: ./artifacts/
+        
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: Release v${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            ./artifacts/*.apk
+            ./artifacts/*.aab
+            ./artifacts/*.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
