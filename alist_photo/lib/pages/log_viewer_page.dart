@@ -126,7 +126,6 @@ class _LogViewerPageState extends State<LogViewerPage> {
                 child: ListTile(
                   leading: Icon(Icons.refresh),
                   title: Text('刷新'),
-                  dense: true,
                 ),
               ),
               const PopupMenuItem(
@@ -160,7 +159,6 @@ class _LogViewerPageState extends State<LogViewerPage> {
                     decoration: const InputDecoration(
                       labelText: '日志级别',
                       border: OutlineInputBorder(),
-                      dense: true,
                     ),
                     items: [
                       const DropdownMenuItem<LogLevel?>(
@@ -195,7 +193,6 @@ class _LogViewerPageState extends State<LogViewerPage> {
                     decoration: const InputDecoration(
                       labelText: '来源',
                       border: OutlineInputBorder(),
-                      dense: true,
                     ),
                     items: _availableSources.map((source) => DropdownMenuItem(
                       value: source == 'All' ? null : source,
