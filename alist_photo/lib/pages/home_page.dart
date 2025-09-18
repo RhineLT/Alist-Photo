@@ -895,8 +895,8 @@ class _HomePageState extends State<HomePage> {
                   child: Container(
                     decoration: BoxDecoration(
             color: _selectedFiles.contains(file.name)
-              ? Colors.green.withValues(alpha: 0.3)
-              : Colors.black.withValues(alpha: 0.1),
+              ? Colors.green.withAlpha((0.3 * 255).round())
+              : Colors.black.withAlpha((0.1 * 255).round()),
                       border: _selectedFiles.contains(file.name)
                           ? Border.all(color: Colors.green, width: 3)
                           : null,

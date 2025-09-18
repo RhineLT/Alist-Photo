@@ -155,7 +155,9 @@ class _LogViewerPageState extends State<LogViewerPage> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<LogLevel?>(
-                    initialValue: _selectedLevel,
+                    // 兼容不同 SDK：保留 value，同时忽略新版弃用提示
+                    // ignore: deprecated_member_use
+                    value: _selectedLevel,
                     decoration: const InputDecoration(
                       labelText: '日志级别',
                       border: OutlineInputBorder(),
@@ -189,7 +191,9 @@ class _LogViewerPageState extends State<LogViewerPage> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: DropdownButtonFormField<String?>(
-                    initialValue: _selectedSource == 'All' ? null : _selectedSource,
+                    // 兼容不同 SDK：保留 value，同时忽略新版弃用提示
+                    // ignore: deprecated_member_use
+                    value: _selectedSource == 'All' ? null : _selectedSource,
                     decoration: const InputDecoration(
                       labelText: '来源',
                       border: OutlineInputBorder(),

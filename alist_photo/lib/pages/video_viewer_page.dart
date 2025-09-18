@@ -110,8 +110,8 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: _showAppBar
-          ? AppBar(
-              backgroundColor: Colors.black.withValues(alpha: 0.7),
+      ? AppBar(
+              backgroundColor: Colors.black.withAlpha((0.7 * 255).round()),
               foregroundColor: Colors.white,
               title: Text(
                 '${_currentIndex + 1} / ${widget.files.length}',
@@ -162,7 +162,7 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
                   end: Alignment.bottomCenter,
                   colors: [
                     Colors.transparent,
-                    Colors.black.withValues(alpha: 0.7),
+                    Colors.black.withAlpha((0.7 * 255).round()),
                   ],
                 ),
               ),

@@ -96,6 +96,8 @@ class FileUploadService extends ChangeNotifier {
     }
     
     LogService.instance.info('Added ${taskIds.length} upload tasks', 'FileUploadService');
+    // 尝试启动队列（若有空闲并发可用则立即开始）
+    _processQueue();
     return taskIds;
   }
 
@@ -124,6 +126,8 @@ class FileUploadService extends ChangeNotifier {
     });
     
     notifyListeners();
+    // 添加任务后尝试启动（如果并发未满）
+    _processQueue();
     return task.id;
   }
   
@@ -208,7 +212,8 @@ class FileUploadService extends ChangeNotifier {
   }
   Future<void> _performUpload(UploadTask task) async {
     final file = File(task.filePath);
-    final bytes = await file.readAsBytes();
+    // 大文件避免一次性读入内存，改为流式上传
+    final stream = file.openRead();
     final targetFilePath = '${task.targetPath.endsWith('/') ? task.targetPath : '${task.targetPath}/'}${task.fileName}';
     
     LogService.instance.info('Starting upload: ${task.fileName}', 'FileUploadService', {
@@ -237,7 +242,7 @@ class FileUploadService extends ChangeNotifier {
     try {
       final response = await dio.put(
         '${_apiClient.serverUrl}/api/fs/put',
-        data: Stream.fromIterable([bytes]),
+        data: stream,
         options: Options(
           headers: headers,
           validateStatus: (status) => status! < 400,

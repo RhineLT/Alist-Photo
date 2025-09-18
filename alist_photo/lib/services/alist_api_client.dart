@@ -175,31 +175,34 @@ class AlistApiClient {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['code'] == 200) {
-          final content = data['data']['content'] as List?;
-          if (content != null) {
-            final files = content.map((item) {
-              // 确保每个文件都有正确的路径信息
-              final file = AlistFile.fromJson(item);
-              // 如果文件的path字段为空，使用当前目录路径
-              if (file.path.isEmpty) {
-                return AlistFile(
-                  name: file.name,
-                  size: file.size,
-                  isDir: file.isDir,
-                  modified: file.modified,
-                  created: file.created,
-                  thumb: file.thumb,
-                  sign: file.sign,
-                  type: file.type,
-                  path: path, // 使用当前查询的路径
-                  rawUrl: file.rawUrl,
-                );
-              }
-              return file;
-            }).toList();
-            LogService.instance.info('Retrieved ${files.length} files from path: $path', 'AlistApiClient');
-            return files;
+          final content = (data['data'] != null) ? data['data']['content'] as List? : null;
+          // 内容为空也视为成功，返回空列表，避免空目录被当做错误
+          if (content == null) {
+            LogService.instance.info('Path has no content (empty dir): $path', 'AlistApiClient');
+            return <AlistFile>[];
           }
+          final files = content.map((item) {
+            // 确保每个文件都有正确的路径信息
+            final file = AlistFile.fromJson(item);
+            // 如果文件的path字段为空，使用当前目录路径
+            if (file.path.isEmpty) {
+              return AlistFile(
+                name: file.name,
+                size: file.size,
+                isDir: file.isDir,
+                modified: file.modified,
+                created: file.created,
+                thumb: file.thumb,
+                sign: file.sign,
+                type: file.type,
+                path: path, // 使用当前查询的路径
+                rawUrl: file.rawUrl,
+              );
+            }
+            return file;
+          }).toList();
+          LogService.instance.info('Retrieved ${files.length} files from path: $path', 'AlistApiClient');
+          return files;
         } else {
           LogService.instance.error('File list API error: ${data['message']}', 'AlistApiClient', {
             'code': data['code'],

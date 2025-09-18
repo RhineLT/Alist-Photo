@@ -31,7 +31,9 @@ class _UploadPageState extends State<UploadPage> {
   
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return AnimatedBuilder(
+      animation: _uploadService,
+      builder: (context, _) => Scaffold(
       appBar: AppBar(
         title: const Text('上传文件'),
         actions: [
@@ -130,7 +132,8 @@ class _UploadPageState extends State<UploadPage> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
   
   Widget _buildStatCard(String title, int count, Color color) {
