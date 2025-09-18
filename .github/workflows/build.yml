@@ -90,92 +90,92 @@ jobs:
         name: android-aab
         path: alist_photo/build/app/outputs/bundle/release/app-release.aab
 
-  build-ios:
-    name: Build iOS
-    runs-on: macos-latest
-    needs: analyze
-    steps:
-    - uses: actions/checkout@v4
+  # build-ios:
+  #   name: Build iOS
+  #   runs-on: macos-latest
+  #   needs: analyze
+  #   steps:
+  #   - uses: actions/checkout@v4
     
-    - name: Update version to current date
-      run: |
-        VERSION_DATE=$(date '+%Y.%m.%d')
-        sed -i '' "s/version: .*+.*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
-        echo "Updated version to: ${VERSION_DATE}+1"
+  #   - name: Update version to current date
+  #     run: |
+  #       VERSION_DATE=$(date '+%Y.%m.%d')
+  #       sed -i '' "s/version: .*+.*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
+  #       echo "Updated version to: ${VERSION_DATE}+1"
     
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.24.5'
-        channel: 'stable'
-        cache: true
+  #   - name: Setup Flutter
+  #     uses: subosito/flutter-action@v2
+  #     with:
+  #       flutter-version: '3.24.5'
+  #       channel: 'stable'
+  #       cache: true
     
-    - name: Get dependencies
-      working-directory: ./alist_photo
-      run: flutter pub get
+  #   - name: Get dependencies
+  #     working-directory: ./alist_photo
+  #     run: flutter pub get
     
-    - name: Pod install
-      working-directory: ./alist_photo/ios
-      run: pod install
+  #   - name: Pod install
+  #     working-directory: ./alist_photo/ios
+  #     run: pod install
     
-    - name: Build iOS (no-codesign)
-      working-directory: ./alist_photo
-      run: flutter build ios --release --no-codesign
+  #   - name: Build iOS (no-codesign)
+  #     working-directory: ./alist_photo
+  #     run: flutter build ios --release --no-codesign
     
-    - name: Create IPA
-      working-directory: ./alist_photo
-      run: flutter build ipa --release --no-codesign
-      continue-on-error: true
+  #   - name: Create IPA
+  #     working-directory: ./alist_photo
+  #     run: flutter build ipa --release --no-codesign
+  #     continue-on-error: true
     
-    - name: Upload iOS artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ios-app
-        path: |
-          alist_photo/build/ios/iphoneos/Runner.app
-          alist_photo/build/ios/ipa/*.ipa
-      continue-on-error: true
+  #   - name: Upload iOS artifact
+  #     uses: actions/upload-artifact@v4
+  #     with:
+  #       name: ios-app
+  #       path: |
+  #         alist_photo/build/ios/iphoneos/Runner.app
+  #         alist_photo/build/ios/ipa/*.ipa
+  #     continue-on-error: true
 
-  create-release:
-    if: github.ref == 'refs/heads/main'
-    needs: [build-android, build-ios]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+  # create-release:
+  #   if: github.ref == 'refs/heads/main'
+  #   needs: [build-android, build-ios]
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: write
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
         
-      - name: Update version to current date
-        run: |
-          VERSION_DATE=$(date '+%Y.%m.%d')
-          sed -i "s/version: .*+.*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
-          echo "Updated version to: ${VERSION_DATE}+1"
+  #     - name: Update version to current date
+  #       run: |
+  #         VERSION_DATE=$(date '+%Y.%m.%d')
+  #         sed -i "s/version: .*+.*/version: ${VERSION_DATE}+1/" alist_photo/pubspec.yaml
+  #         echo "Updated version to: ${VERSION_DATE}+1"
         
-      - name: Get version
-        id: version
-        run: |
-          VERSION=$(grep 'version:' alist_photo/pubspec.yaml | cut -d ' ' -f 2 | tr -d '\r')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
+  #     - name: Get version
+  #       id: version
+  #       run: |
+  #         VERSION=$(grep 'version:' alist_photo/pubspec.yaml | cut -d ' ' -f 2 | tr -d '\r')
+  #         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+  #         echo "Version: $VERSION"
           
-      - name: Download Android APK
-        uses: actions/download-artifact@v4
-        with:
-          name: android-apk
-          path: ./artifacts/
+  #     - name: Download Android APK
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: android-apk
+  #         path: ./artifacts/
           
-      - name: Download Android AAB
-        uses: actions/download-artifact@v4
-        with:
-          name: android-aab
-          path: ./artifacts/
+  #     - name: Download Android AAB
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: android-aab
+  #         path: ./artifacts/
           
-      - name: Download iOS App
-        uses: actions/download-artifact@v4
-        with:
-          name: ios-app
-          path: ./artifacts/
+  #     - name: Download iOS App
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: ios-app
+  #         path: ./artifacts/
         
       - name: Create Release
         uses: softprops/action-gh-release@v1

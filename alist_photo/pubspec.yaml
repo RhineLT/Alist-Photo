@@ -37,35 +37,36 @@ dependencies:
   
   # Network and API
   http: ^1.2.2
-  dio: ^5.4.3
+  dio: ^5.7.0
   
   # Local storage
-  shared_preferences: ^2.2.2
-  path_provider: ^2.1.4
+  shared_preferences: ^2.3.3
+  path_provider: ^2.1.5
   
   # Crypto for password hashing
   crypto: ^3.0.5
   
   # Image viewing and caching
   photo_view: ^0.15.0
-  cached_network_image: ^3.3.1
+  cached_network_image: ^3.4.1
   flutter_staggered_grid_view: ^0.7.0
   flutter_cache_manager: ^3.4.1
   
   # Video and media support
-  video_player: ^2.8.1
-  chewie: ^1.7.4
-  mime: ^1.0.5
+  video_player: ^2.9.2
+  chewie: ^1.8.5
+  mime: ^1.0.6
   
   # File handling and upload
-  file_picker: ^8.1.2
+  file_picker: ^8.1.6
   image_picker: ^1.1.2
   
   # Sharing and file operations
   share_plus: ^10.1.4
   url_launcher: ^6.3.1
   permission_handler: ^11.3.1
-  device_info_plus: ^11.1.0
+  device_info_plus: ^11.2.0
+  package_info_plus: ^8.1.1
   
   # State management
   provider: ^6.1.2
