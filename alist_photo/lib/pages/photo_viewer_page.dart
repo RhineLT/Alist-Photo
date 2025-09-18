@@ -49,7 +49,7 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
     if (file.rawUrl?.isNotEmpty == true) {
       return widget.apiClient.getFullUrl(file.rawUrl!);
     } else {
-      return widget.apiClient.getDownloadUrl(file);
+      return widget.apiClient.getDownloadUrlSync(file);
     }
   }
   
