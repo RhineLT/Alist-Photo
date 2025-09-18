@@ -35,6 +35,27 @@ class MediaCacheManager {
   Directory? _baseCacheDir; // /.../Android/data/<package>/cache
   final Dio _dio = Dio();
   Timer? _cleanupTimer;
+  // 全局下载并发限制
+  static const int _globalMaxConcurrent = 7;
+  int _inflight = 0;
+  final List<Completer<void>> _waiters = [];
+
+  Future<T> _withThrottle<T>(Future<T> Function() action) async {
+    if (_inflight >= _globalMaxConcurrent) {
+      final c = Completer<void>();
+      _waiters.add(c);
+      await c.future;
+    }
+    _inflight++;
+    try {
+      return await action();
+    } finally {
+      _inflight--;
+      if (_waiters.isNotEmpty) {
+        _waiters.removeAt(0).complete();
+      }
+    }
+  }
 
   Future<void> initialize() async {
     await _loadSettings();
@@ -159,26 +180,28 @@ class MediaCacheManager {
   }
 
   Future<File?> _downloadTo(File dest, String url) async {
-    try {
-      await dest.parent.create(recursive: true);
-      final tmp = File('${dest.path}.part');
-      if (await tmp.exists()) await tmp.delete();
-      await _dio.download(url, tmp.path);
-      if (await dest.exists()) await dest.delete();
-      await tmp.rename(dest.path);
-      return dest;
-    } catch (e) {
-      LogService.instance.error('Download failed: $url -> ${dest.path}, error: $e', 'MediaCacheManager');
-      return null;
-    } finally {
-      // 清理（若存在）
-      final tmp = File('${dest.path}.part');
-      if (await tmp.exists()) {
-        try { await tmp.delete(); } catch (_) {}
+    return _withThrottle<File?>(() async {
+      try {
+        await dest.parent.create(recursive: true);
+        final tmp = File('${dest.path}.part');
+        if (await tmp.exists()) await tmp.delete();
+        await _dio.download(url, tmp.path);
+        if (await dest.exists()) await dest.delete();
+        await tmp.rename(dest.path);
+        return dest;
+      } catch (e) {
+        LogService.instance.error('Download failed: $url -> ${dest.path}, error: $e', 'MediaCacheManager');
+        return null;
+      } finally {
+        // 清理（若存在）
+        final tmp = File('${dest.path}.part');
+        if (await tmp.exists()) {
+          try { await tmp.delete(); } catch (_) {}
+        }
+        // 下载后尝试清理容量
+        unawaited(_cleanupIfNeeded());
       }
-      // 下载后尝试清理容量
-      unawaited(_cleanupIfNeeded());
-    }
+    });
   }
 
   Future<void> _touch(File f) async {
@@ -232,7 +255,7 @@ class MediaCacheManager {
   }
 
   // 批量预加载指定目录下文件的缩略图
-  Future<void> preloadThumbnails(AlistApiClient api, List<AlistFile> files, {int maxConcurrent = 4}) async {
+  Future<void> preloadThumbnails(AlistApiClient api, List<AlistFile> files, {int maxConcurrent = 7}) async {
     await initializeIfNeeded();
     final queue = <Future>[];
     for (final f in files) {
@@ -256,6 +279,31 @@ class MediaCacheManager {
       await Future.delayed(const Duration(milliseconds: 50));
     }
     await Future.wait(queue);
+  }
+
+  // 同步缓存目录结构，与 Alist 目录保持一致（仅创建目录，不创建文件）
+  Future<void> syncDirectoryStructure(String path, List<AlistFile> files) async {
+    await initializeIfNeeded();
+    final safePath = _ensureRelative(path.startsWith('/') ? path.substring(1) : path);
+    final dirsToEnsure = <String>{safePath};
+    for (final f in files) {
+      if (f.isDir) {
+        final child = safePath.isEmpty ? f.name : p.join(safePath, f.name);
+        dirsToEnsure.add(child);
+      }
+    }
+
+    for (final rel in dirsToEnsure) {
+      for (final type in [CacheType.thumbnail, CacheType.original, CacheType.video]) {
+        final d = Directory(p.join(_baseCacheDir!.path, switch (type) {
+          CacheType.thumbnail => _thumbnailDir,
+          CacheType.original => _originalDir,
+          CacheType.video => _videoDir,
+          CacheType.all => _originalDir,
+        }, rel));
+        try { if (!await d.exists()) { await d.create(recursive: true); } } catch (_) {}
+      }
+    }
   }
 
   // 统计与清理

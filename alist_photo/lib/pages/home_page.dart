@@ -53,7 +53,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
   
-  Future<void> _loadFiles() async {
+  Future<void> _loadFiles({bool refresh = false}) async {
     if (!widget.apiClient.isConfigured) {
       LogService.instance.warning('Cannot load files: Alist not configured', 'HomePage');
       return;
@@ -63,10 +63,11 @@ class _HomePageState extends State<HomePage> {
     
     setState(() {
       _isLoading = true;
+      _files = []; // 清空旧数据，避免加载过程中误触导致路径错位
     });
     
     try {
-  final files = await widget.apiClient.getFileList(_currentPath);
+  final files = await widget.apiClient.getFileList(_currentPath, refresh: refresh);
       if (files != null) {
         LogService.instance.info('Successfully loaded ${files.length} files', 'HomePage', {
           'path': _currentPath,
@@ -75,6 +76,12 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _files = files;
         });
+        // 同步缓存目录结构（当前路径与子目录）
+        try {
+          await MediaCacheManager.instance.syncDirectoryStructure(_currentPath, files);
+        } catch (e) {
+          LogService.instance.warning('Sync cache dir structure failed: $e', 'HomePage');
+        }
         // 预加载当前目录的缩略图到本地缓存
         try {
           await MediaCacheManager.instance.preloadThumbnails(widget.apiClient, files);
@@ -136,9 +143,15 @@ class _HomePageState extends State<HomePage> {
   }
   
   void _navigateToFolder(AlistFile folder) {
+    if (_isLoading) return; // 加载中禁止继续导航，防止错位
     final newPath = _currentPath == '/' 
         ? '/${folder.name}' 
         : '$_currentPath/${folder.name}';
+    // 避免重复进入同名子目录（例如 /a/b/b）
+    final parts = _currentPath.split('/').where((e) => e.isNotEmpty).toList();
+    if (parts.isNotEmpty && parts.last == folder.name) {
+      return;
+    }
     
     setState(() {
       _currentPath = newPath;
@@ -1146,7 +1159,7 @@ class _HomePageState extends State<HomePage> {
                         ),
                       )
                     : RefreshIndicator(
-                        onRefresh: _loadFiles,
+                        onRefresh: () => _loadFiles(refresh: true),
                         child: _isGridView
                             ? MasonryGridView.count(
                                 crossAxisCount: 2,

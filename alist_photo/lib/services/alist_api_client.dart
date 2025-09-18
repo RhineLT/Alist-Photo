@@ -142,7 +142,7 @@ class AlistApiClient {
   String get serverUrl => _serverUrl ?? '';
 
   // 获取文件列表
-  Future<List<AlistFile>?> getFileList(String path) async {
+  Future<List<AlistFile>?> getFileList(String path, {bool refresh = false}) async {
     LogService.instance.debug('Fetching file list for path: $path', 'AlistApiClient');
     
     if (_token == null) {
@@ -166,7 +166,7 @@ class AlistApiClient {
           'password': '',
           'page': 1,
           'per_page': 0,
-          'refresh': false,
+          'refresh': refresh,
         }),
       );
       
