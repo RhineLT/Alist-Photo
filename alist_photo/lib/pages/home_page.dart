@@ -250,53 +250,15 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _downloadFileToLocal(AlistFile file) async {
     try {
-      // 显示下载进度对话框
-      bool isDownloading = true;
-      double progress = 0.0;
-      String? downloadPath;
-      
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setState) => AlertDialog(
-            title: const Text('下载文件'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('正在下载: ${file.name}'),
-                const SizedBox(height: 16),
-                if (isDownloading) ...[
-                  LinearProgressIndicator(value: progress > 0 ? progress : null),
-                  const SizedBox(height: 8),
-                  Text('${(progress * 100).toStringAsFixed(1)}%'),
-                ] else ...[
-                  const Icon(Icons.check_circle, color: Colors.green, size: 48),
-                  const SizedBox(height: 8),
-                  const Text('下载完成！'),
-                  if (downloadPath != null) Text('保存至: $downloadPath'),
-                ],
-              ],
-            ),
-            actions: [
-              if (!isDownloading) ...[
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('确定'),
-                ),
-              ] else ...[
-                TextButton(
-                  onPressed: () {
-                    // TODO: 实现取消下载功能
-                    Navigator.pop(context);
-                  },
-                  child: const Text('取消'),
-                ),
-              ],
-            ],
+      // 显示简单的下载提示
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('开始下载: ${file.name}'),
+            duration: const Duration(seconds: 2),
           ),
-        ),
-      );
+        );
+      }
 
       // 获取下载URL
       LogService.instance.info('Getting download URL for file: ${file.name}', 'HomePage');
@@ -312,55 +274,60 @@ class _HomePageState extends State<HomePage> {
       final filePath = await downloadService.downloadFile(
         url: downloadUrl,
         fileName: file.name,
-        onProgress: (received, total) {
-          if (total > 0) {
-            final newProgress = received / total;
-            if ((newProgress - progress).abs() > 0.01) { // 只在进度变化超过1%时更新UI
-              progress = newProgress;
-              if (context.mounted) {
-                // 触发对话框重建
-                (context as Element).markNeedsBuild();
-              }
-            }
-          }
-        },
       );
 
-      // 更新下载状态
-      isDownloading = false;
-      downloadPath = filePath;
-      
       if (filePath != null) {
         LogService.instance.info('File downloaded successfully', 'HomePage', {
           'file_name': file.name,
           'local_path': filePath,
         });
         
-        if (context.mounted) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('文件下载完成: ${file.name}'),
+              content: Text('下载完成，保存至: Downloads/${file.name}'),
+              duration: const Duration(seconds: 4),
               action: SnackBarAction(
-                label: '查看',
+                label: '确定',
                 onPressed: () {
-                  // TODO: 打开文件管理器或查看文件
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
                 },
               ),
             ),
           );
         }
       } else {
-        LogService.instance.error('File download failed', 'HomePage', {
-          'file_name': file.name,
-        });
+        LogService.instance.error('File download failed', 'HomePage');
         
-        if (context.mounted) {
-          Navigator.pop(context);
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('文件下载失败: ${file.name}'),
+              content: Text('下载失败: ${file.name}'),
               backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
             ),
+          );
+        }
+      }
+    } catch (e) {
+      LogService.instance.error('Download error: $e', 'HomePage');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('下载出错: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+              );
+      }
+    }
+  }
+
+  void _showFileMenu(AlistFile file) {
           );
         }
       }
@@ -674,28 +641,7 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ),
               ),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      file.name,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                      // 移除缩略图的文件名显示限制
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      file.formattedSize,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                      // 移除缩略图的文件大小显示限制
-                    ),
-                  ],
-                ),
-              ),
+              // 移除缩略图的文件名和大小显示，提高信息密度
             ],
           ),
         ),
