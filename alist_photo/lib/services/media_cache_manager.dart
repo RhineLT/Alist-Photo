@@ -247,6 +247,26 @@ class MediaCacheManager {
     return null;
   }
 
+  // 仅检查是否已缓存侧车视频
+  Future<File?> getLocalVideo(AlistFile file) async {
+    await initializeIfNeeded();
+    final rel = _alistRelativePath(file);
+    final f = _fileFor(CacheType.video, rel);
+    if (await f.exists()) {
+      await _touch(f);
+      LogService.instance.debug('Video cache hit: ${f.path}', 'MediaCacheManager', {
+        'file': file.name,
+        'path': file.path,
+      });
+      return f;
+    }
+    LogService.instance.debug('Video cache miss', 'MediaCacheManager', {
+      'file': file.name,
+      'path': file.path,
+    });
+    return null;
+  }
+
   Future<void> initializeIfNeeded() async {
     if (_baseCacheDir == null) {
       await initialize();
@@ -290,6 +310,27 @@ class MediaCacheManager {
     final res = await _downloadTo(dest, url);
     if (res != null) {
       LogService.instance.info('Original downloaded', 'MediaCacheManager', {
+        'dest': res.path,
+      });
+    }
+    return res;
+  }
+
+  // 获取或下载侧车视频到本地缓存
+  Future<File?> getOrFetchVideo(AlistApiClient api, AlistFile file) async {
+    await initializeIfNeeded();
+    final existing = await getLocalVideo(file);
+    if (existing != null) return existing;
+    final url = await api.getDownloadUrl(file);
+    final rel = _alistRelativePath(file);
+    final dest = _fileFor(CacheType.video, rel);
+    LogService.instance.info('Downloading sidecar video', 'MediaCacheManager', {
+      'url': url,
+      'dest': dest.path,
+    });
+    final res = await _downloadTo(dest, url);
+    if (res != null) {
+      LogService.instance.info('Sidecar video downloaded', 'MediaCacheManager', {
         'dest': res.path,
       });
     }

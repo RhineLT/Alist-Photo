@@ -29,17 +29,28 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
   late PageController _pageController;
   late int _currentIndex;
   bool _showAppBar = true;
+  // 动态播放相关（页面层，避免与 PhotoView 手势冲突）
+  LocalDynamicInfo? _currentDynamic;
+  VideoPlayerController? _videoController;
+  bool _isPressing = false;
+  bool _isVideoReady = false;
+  String? _currentVideoPath;
   
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
+    // 预备当前页的动态信息
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _prepareDynamicForIndex(_currentIndex);
+    });
   }
   
   @override
   void dispose() {
     _pageController.dispose();
+    try { _videoController?.dispose(); } catch (_) {}
     super.dispose();
   }
   
@@ -47,6 +58,162 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
     setState(() {
       _showAppBar = !_showAppBar;
     });
+  }
+
+  Future<void> _prepareDynamicForIndex(int index) async {
+    try {
+      final file = widget.files[index];
+      final localImage = await MediaCacheManager.instance.getOrFetchOriginal(widget.apiClient, file);
+      LocalDynamicInfo? result;
+
+      if (localImage != null && await localImage.exists()) {
+        // 先根据同目录文件列表找侧车视频
+        final sidecar = _findSidecarFromList(file);
+        if (sidecar != null) {
+          final localVideo = await MediaCacheManager.instance.getOrFetchVideo(widget.apiClient, sidecar);
+          if (localVideo != null && await localVideo.exists()) {
+            // 根据扩展名大致判断供应商
+            final ext = sidecar.name.toLowerCase().split('.').last;
+            final vendor = (ext == 'mov') ? DynamicVendor.apple : DynamicVendor.xiaomi;
+            result = LocalDynamicInfo(
+              isDynamic: true,
+              vendor: vendor,
+              imageFile: localImage,
+              videoFile: localVideo,
+            );
+          }
+        }
+        // 若未找到侧车，回退到本地嵌入式检查
+        if (result == null) {
+          final info = await MediaType.detectLocalDynamic(localImage);
+          // 若是嵌入式动态图，则尝试抽取视频
+          if (info.isEmbeddedMotion) {
+            final extracted = await MediaType.extractEmbeddedMicroVideo(localImage);
+            if (extracted != null && await extracted.exists()) {
+              result = LocalDynamicInfo(
+                isDynamic: true,
+                vendor: DynamicVendor.google,
+                imageFile: localImage,
+                videoFile: extracted,
+                isEmbeddedMotion: true,
+              );
+            } else {
+              result = info; // 仅保留标识
+            }
+          } else {
+            result = info;
+          }
+        }
+      }
+
+      LogService.instance.info('Dynamic prepared for index $index', 'PhotoViewer', {
+        'has_result': result != null,
+        'has_sidecar': result?.videoFile != null,
+        'embedded': result?.isEmbeddedMotion,
+        'vendor': result?.vendor.name,
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _currentDynamic = result;
+      });
+    } catch (e) {
+      LogService.instance.warning('Prepare dynamic failed: $e', 'PhotoViewer');
+    }
+  }
+
+  AlistFile? _findSidecarFromList(AlistFile baseFile) {
+    String baseNameNoExt(String name) {
+      final parts = name.split('.');
+      if (parts.length <= 1) return name;
+      return parts.sublist(0, parts.length - 1).join('.');
+    }
+    final base = baseNameNoExt(baseFile.name).toLowerCase();
+    final sameDir = widget.files.where((f) => !f.isDir).toList();
+    // 优先匹配完全同名不同扩展
+    final exts = ['mov', 'mp4', 'mp4v'];
+    for (final f in sameDir) {
+      final name = f.name.toLowerCase();
+      final parts = name.split('.');
+      if (parts.length < 2) continue;
+      final stem = parts.sublist(0, parts.length - 1).join('.');
+      final ext = parts.last;
+      if (stem == base && exts.contains(ext)) {
+        return f;
+      }
+    }
+    // 次选：常见后缀 _VIDEO
+    final alt = '${base}_video.mp4';
+    for (final f in sameDir) {
+      if (f.name.toLowerCase() == alt) return f;
+    }
+    return null;
+  }
+
+  Future<void> _startPressPlay() async {
+    final info = _currentDynamic;
+    if (info == null || info.videoFile == null) {
+      LogService.instance.debug('Playback ignored: no sidecar for current', 'PhotoViewer');
+      return;
+    }
+    try {
+      // 若当前 controller 对应不同文件，先释放
+      if (_videoController != null && _currentVideoPath != info.videoFile!.path) {
+        try { await _videoController!.dispose(); } catch (_) {}
+        _videoController = null;
+        _isVideoReady = false;
+      }
+      if (_videoController == null) {
+        LogService.instance.info('Initializing video for LIVE playback', 'PhotoViewer', {
+          'video': info.videoFile!.path,
+        });
+        final c = VideoPlayerController.file(info.videoFile!);
+        await c.initialize();
+        await c.setLooping(true);
+        _videoController = c;
+        _currentVideoPath = info.videoFile!.path;
+        _isVideoReady = true;
+      }
+      await _videoController!.seekTo(Duration.zero);
+      await _videoController!.play();
+      if (!mounted) return;
+      setState(() {
+        _isPressing = true;
+      });
+      LogService.instance.info('LIVE playback started', 'PhotoViewer');
+    } catch (e) {
+      LogService.instance.error('Start LIVE playback failed: $e', 'PhotoViewer');
+    }
+  }
+
+  Future<void> _stopPressPlay() async {
+    try {
+      if (_videoController != null) {
+        await _videoController!.pause();
+        await _videoController!.seekTo(Duration.zero);
+      }
+      if (!mounted) return;
+      setState(() { _isPressing = false; });
+      LogService.instance.info('LIVE playback stopped', 'PhotoViewer');
+    } catch (e) {
+      LogService.instance.warning('Stop LIVE playback warning: $e', 'PhotoViewer');
+    }
+  }
+
+  Future<void> _togglePlayback() async {
+    if (_isPressing) {
+      await _stopPressPlay();
+    } else {
+      await _startPressPlay();
+    }
+  }
+
+  Future<void> _onPageChanged(int index) async {
+    setState(() { _currentIndex = index; });
+    // 切换页面时停止当前播放
+    await _stopPressPlay();
+    // 预备新页面的动态信息
+    await _prepareDynamicForIndex(index);
   }
   
   Future<void> _downloadCurrentImage() async {
@@ -140,11 +307,7 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
               ),
             ),
             pageController: _pageController,
-            onPageChanged: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
-            },
+            onPageChanged: _onPageChanged,
             backgroundDecoration: const BoxDecoration(
               color: Colors.black,
             ),
@@ -156,6 +319,65 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
               behavior: HitTestBehavior.translucent,
             ),
           ),
+          // LIVE 标识（可点击：有侧车视频时）
+          if (_currentDynamic?.videoFile != null)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: GestureDetector(
+                onTap: _togglePlayback,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(_isPressing ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 16),
+                      const SizedBox(width: 4),
+                      const Text('LIVE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          // 仅嵌入式（无侧车）时显示不可点击的 LIVE 提示
+          if (_currentDynamic?.isDynamic == true && _currentDynamic?.videoFile == null)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black38,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.motion_photos_on, color: Colors.white70, size: 16),
+                    SizedBox(width: 4),
+                    Text('LIVE', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          // 长按播放覆盖层
+          if (_isPressing && _isVideoReady && _videoController != null && _videoController!.value.isInitialized)
+            Positioned.fill(
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: _videoController!.value.aspectRatio == 0
+                      ? 1.0
+                      : _videoController!.value.aspectRatio,
+                  child: VideoPlayer(_videoController!),
+                ),
+              ),
+            ),
           // 底部信息栏
           if (_showAppBar)
             Positioned(
@@ -269,10 +491,6 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
   File? _localFile;
   bool _loading = true;
   String? _error;
-  LocalDynamicInfo? _dynamicInfo;
-  VideoPlayerController? _videoController;
-  bool _isVideoReady = false;
-  bool _isPressing = false;
 
   @override
   void initState() {
@@ -290,22 +508,6 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
           _loading = false;
         });
       }
-      if (f != null && await f.exists()) {
-        // 本地动态检测
-        final info = await MediaType.detectLocalDynamic(f);
-        LogService.instance.info('Dynamic detection result', 'PhotoViewer', {
-          'file': f.path,
-          'is_dynamic': info.isDynamic,
-          'vendor': info.vendor.name,
-          'has_sidecar': info.videoFile != null,
-          'embedded': info.isEmbeddedMotion,
-        });
-        if (mounted) {
-          setState(() {
-            _dynamicInfo = info;
-          });
-        }
-      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -314,71 +516,6 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
         });
       }
     }
-  }
-
-  Future<void> _startPlayIfAvailable() async {
-    final info = _dynamicInfo;
-    if (info == null || info.videoFile == null) {
-      // 无侧车视频，不播放，仅记录
-      LogService.instance.debug('Long-press ignored: no sidecar video', 'PhotoViewer', {
-        'file': _localFile?.path,
-      });
-      return;
-    }
-    // 避免重复初始化
-    if (_videoController == null) {
-      try {
-        LogService.instance.info('Initializing sidecar video for long-press', 'PhotoViewer', {
-          'video': info.videoFile!.path,
-        });
-        final c = VideoPlayerController.file(info.videoFile!);
-        await c.initialize();
-        await c.setLooping(true);
-        _videoController = c;
-        if (!mounted) return;
-        setState(() {
-          _isVideoReady = true;
-        });
-      } catch (e) {
-        LogService.instance.error('Video init failed: $e', 'PhotoViewer');
-        return;
-      }
-    }
-    try {
-      await _videoController!.seekTo(Duration.zero);
-      await _videoController!.play();
-      if (mounted) {
-        setState(() {
-          _isPressing = true;
-        });
-      }
-      LogService.instance.info('Long-press playback started', 'PhotoViewer');
-    } catch (e) {
-      LogService.instance.error('Start play failed: $e', 'PhotoViewer');
-    }
-  }
-
-  Future<void> _stopPlay() async {
-    try {
-      if (_videoController != null) {
-        await _videoController!.pause();
-        await _videoController!.seekTo(Duration.zero);
-      }
-      if (mounted) {
-        setState(() {
-          _isPressing = false;
-        });
-      }
-      LogService.instance.info('Long-press playback stopped', 'PhotoViewer');
-    } catch (e) {
-      LogService.instance.warning('Stop play warning: $e', 'PhotoViewer');
-    }
-  }
-
-  @override
-  void dispose() {
-    _videoController?.dispose();
-    super.dispose();
   }
 
   @override
@@ -407,53 +544,8 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
       );
     }
     if (_localFile != null && _localFile!.existsSync()) {
-      // 默认显示静态图，支持长按播放
-      final child = Stack(
-        fit: StackFit.passthrough,
-        children: [
-          Image.file(_localFile!, fit: BoxFit.contain),
-          if (_isPressing && _isVideoReady && _videoController != null && _videoController!.value.isInitialized)
-            Center(
-              child: AspectRatio(
-                aspectRatio: _videoController!.value.aspectRatio == 0
-                    ? 1.0
-                    : _videoController!.value.aspectRatio,
-                child: VideoPlayer(_videoController!),
-              ),
-            ),
-          // LIVE 标识
-          if (_dynamicInfo?.isDynamic == true)
-            Positioned(
-              top: 12,
-              left: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white24),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.motion_photos_on, color: Colors.white, size: 16),
-                    SizedBox(width: 4),
-                    Text(
-                      'LIVE',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      );
-      return GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onLongPressStart: (_) => _startPlayIfAvailable(),
-        onLongPressEnd: (_) => _stopPlay(),
-        child: child,
-      );
+      // 仅显示静态图，由页面层处理长按与视频覆盖层
+      return Image.file(_localFile!, fit: BoxFit.contain);
     }
     return Container(color: Colors.black);
   }

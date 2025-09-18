@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import 'log_service.dart';
 
@@ -199,6 +200,128 @@ class MediaType {
         'path': jpg.path,
       });
       return false;
+    }
+  }
+
+  /// 基于 XMP 中的 MicroVideoOffset 将嵌入式视频从 JPEG 中提取为临时 MP4 文件
+  /// 行业通用做法：
+  /// - 读取 XMP，解析 (GCamera:)MicroVideoOffset；
+  /// - 按 videoStart = fileSize - offset 定位视频起始；
+  /// - 校验起始附近存在 'ftyp' box；
+  /// - 复制 [videoStart..EOF] 为 .mp4 临时文件。
+  static Future<File?> extractEmbeddedMicroVideo(File jpg) async {
+    try {
+      final stat = await jpg.stat();
+      final fileSize = stat.size;
+      final raf = await jpg.open();
+      // 读取头部较大块以解析 XMP（APP1 常见在头部），以及尾部一小块备用
+      final headLen = fileSize < 512 * 1024 ? fileSize : 512 * 1024;
+      final head = await raf.read(headLen);
+
+      int? offset; // MicroVideoOffset
+      String headStr;
+      try {
+        headStr = String.fromCharCodes(head);
+      } catch (_) {
+        headStr = '';
+      }
+
+      if (headStr.isNotEmpty) {
+        final re = RegExp(r'(?:GCamera:)?MicroVideoOffset[^0-9]*([0-9]+)');
+        final m = re.firstMatch(headStr);
+        if (m != null) {
+          offset = int.tryParse(m.group(1)!);
+        }
+      }
+
+      // 若头部未找到，尝试尾部（某些实现也会在尾部留痕）
+      if (offset == null) {
+        final tailLen = fileSize < 256 * 1024 ? fileSize : 256 * 1024;
+        await raf.setPosition(fileSize - tailLen);
+        final tail = await raf.read(tailLen);
+        String tailStr;
+        try { tailStr = String.fromCharCodes(tail); } catch (_) { tailStr = ''; }
+        if (tailStr.isNotEmpty) {
+          final re = RegExp(r'(?:GCamera:)?MicroVideoOffset[^0-9]*([0-9]+)');
+          final m = re.firstMatch(tailStr);
+          if (m != null) {
+            offset = int.tryParse(m.group(1)!);
+          }
+        }
+      }
+
+      if (offset == null || offset <= 0 || offset >= fileSize) {
+        await raf.close();
+        LogService.instance.warning('No valid MicroVideoOffset found', 'MediaType', {
+          'path': jpg.path,
+        });
+        return null;
+      }
+
+      int start = fileSize - offset; // 常见定义：从文件尾部回退 offset 为视频起点
+      if (start < 0) start = 0;
+
+      // 校验 MP4 ftyp
+      await raf.setPosition(start);
+      final probe = await raf.read(4096); // 取 4KB 探测 ftyp
+      int? ftypIndex;
+      for (int i = 0; i <= probe.length - 4; i++) {
+        if (probe[i] == 0x66 && probe[i + 1] == 0x74 && probe[i + 2] == 0x79 && probe[i + 3] == 0x70) {
+          // 'f' 't' 'y' 'p'
+          ftypIndex = i;
+          break;
+        }
+      }
+      if (ftypIndex == null) {
+        await raf.close();
+        LogService.instance.warning('MP4 ftyp not found near expected start', 'MediaType', {
+          'path': jpg.path,
+          'start': start,
+        });
+        return null;
+      }
+
+      final videoStart = start + (ftypIndex - 4 >= 0 ? ftypIndex - 4 : 0);
+      if (videoStart < 0 || videoStart >= fileSize) {
+        await raf.close();
+        LogService.instance.warning('Computed videoStart out of range', 'MediaType', {
+          'videoStart': videoStart,
+          'fileSize': fileSize,
+        });
+        return null;
+      }
+
+      // 将 [videoStart..EOF] 写入临时 mp4
+      final tmpDir = await getTemporaryDirectory();
+      final base = p.basenameWithoutExtension(jpg.path);
+      final outPath = p.join(tmpDir.path, '${base}_motion.mp4');
+      final out = File(outPath);
+      if (await out.exists()) { try { await out.delete(); } catch (_) {} }
+
+      final outRaf = await out.open(mode: FileMode.write);
+      const chunk = 1024 * 1024;
+      int pos = videoStart;
+      await raf.setPosition(videoStart);
+      while (pos < fileSize) {
+        final toRead = (fileSize - pos) < chunk ? (fileSize - pos) : chunk;
+        final data = await raf.read(toRead);
+        if (data.isEmpty) break;
+        await outRaf.writeFrom(data);
+        pos += data.length;
+      }
+      await outRaf.close();
+      await raf.close();
+
+      LogService.instance.info('Extracted embedded motion video', 'MediaType', {
+        'jpg': jpg.path,
+        'mp4': out.path,
+      });
+      return out;
+    } catch (e) {
+      LogService.instance.error('extractEmbeddedMicroVideo failed: $e', 'MediaType', {
+        'path': jpg.path,
+      });
+      return null;
     }
   }
 
