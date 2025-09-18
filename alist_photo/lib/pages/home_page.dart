@@ -199,10 +199,10 @@ class _HomePageState extends State<HomePage> {
     for (final file in selectedFiles) {
       try {
         final downloadUrl = await widget.apiClient.getDownloadUrl(file);
-        await FileDownloadService.downloadFile(
-          downloadUrl,
-          file.name,
-          onProgress: (progress) {
+        await FileDownloadService.instance.downloadFile(
+          url: downloadUrl,
+          fileName: file.name,
+          onProgress: (received, total) {
             // 可以添加全局进度显示
           },
         );
@@ -664,7 +664,7 @@ class _HomePageState extends State<HomePage> {
         _openLivePhoto(file, index);
         break;
       default:
-        _showFileOperations(file);
+        _showFileMenu(file);
         break;
     }
   }

@@ -143,7 +143,8 @@ class MediaCacheManager {
       int count = 0;
       int totalSize = 0;
       
-      final cacheDir = await cacheManager.getDirectory();
+      // Use FileSystem to get cache directory
+      final cacheDir = await cacheManager.getFileSystem().directory();
       if (await cacheDir.exists()) {
         await for (final entity in cacheDir.list()) {
           if (entity is File) {
@@ -210,7 +211,8 @@ class MediaCacheManager {
       final cacheManagers = [_thumbnailCache, _imageCache, _videoCache];
       
       for (final manager in cacheManagers) {
-        final dir = await manager.getDirectory();
+        // Use FileSystem to get cache directory
+        final dir = await manager.getFileSystem().directory();
         if (await dir.exists()) {
           await for (final entity in dir.list(recursive: true)) {
             if (entity is File) {

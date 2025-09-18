@@ -85,13 +85,13 @@ class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {
     try {
       final downloadUrl = await widget.apiClient.getDownloadUrl(widget.file);
       
-      await FileDownloadService.downloadFile(
-        downloadUrl,
-        widget.file.name,
-        onProgress: (progress) {
-          LogService.instance.debug('Download progress: ${(progress * 100).toStringAsFixed(1)}%', 'LivePhotoViewer');
-        },
-      );
+      await FileDownloadService.instance.downloadFile(
+          url: downloadUrl,
+          fileName: file.name,
+          onProgress: (received, total) {
+            LogService.instance.debug('Download progress: ${((received / total) * 100).toStringAsFixed(1)}%', 'LivePhotoViewer');
+          },
+        );
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

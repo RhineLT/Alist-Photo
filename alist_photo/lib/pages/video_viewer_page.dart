@@ -51,11 +51,11 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
       final file = widget.files[_currentIndex];
       final downloadUrl = await widget.apiClient.getDownloadUrl(file);
       
-      await FileDownloadService.downloadFile(
-        downloadUrl,
-        file.name,
-        onProgress: (progress) {
-          LogService.instance.debug('Download progress: ${(progress * 100).toStringAsFixed(1)}%', 'VideoViewer');
+      await FileDownloadService.instance.downloadFile(
+        url: downloadUrl,
+        fileName: file.name,
+        onProgress: (received, total) {
+          LogService.instance.debug('Download progress: ${((received / total) * 100).toStringAsFixed(1)}%', 'VideoViewer');
         },
       );
       
