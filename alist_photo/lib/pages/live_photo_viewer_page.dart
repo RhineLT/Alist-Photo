@@ -1,352 +1,700 @@
-import 'package:flutter/material.dart';import 'package:flutter/material.dart';import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';import 'package:flutter/material.dart';import 'package:flutter/material.dart';import 'package:flutter/material.dart';
 
 import 'package:flutter/services.dart';
 
-import 'package:photo_view/photo_view.dart';import 'package:flutter/services.dart';import 'package:flutter/services.dart';
+import 'package:photo_view/photo_view.dart';import 'package:flutter/services.dart';
 
 import 'package:video_player/video_player.dart';
 
-import 'package:cached_network_image/cached_network_image.dart';import 'package:photo_view/photo_view.dart';import 'package:photo_view/photo_view.dart';
+import 'package:cached_network_image/cached_network_image.dart';import 'package:photo_view/photo_view.dart';import 'package:flutter/services.dart';import 'package:flutter/services.dart';
 
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import 'package:video_player/video_player.dart';import 'package:video_player/video_player.dart';
+import 'package:video_player/video_player.dart';
 
 import '../services/alist_api_client.dart';
 
-import '../services/log_service.dart';import 'package:cached_network_image/cached_network_image.dart';import 'package:cached_network_image/cached_network_image.dart';
+import '../services/log_service.dart';import 'package:cached_network_image/cached_network_image.dart';import 'package:photo_view/photo_view.dart';import 'package:photo_view/photo_view.dart';
 
 import '../services/file_download_service.dart';
 
-import '../services/media_cache_manager.dart';import 'package:wakelock_plus/wakelock_plus.dart';import 'package:wakelock_plus/wakelock_plus.dart';
+import '../services/media_cache_manager.dart';import 'package:wakelock_plus/wakelock_plus.dart';
 
 
 
-// Live Photo 类型枚举import '../services/alist_api_client.dart';import '../services/alist_api_client.dart';
+enum LivePhotoType {import 'package:video_player/video_player.dart';import 'package:video_player/video_player.dart';
 
-enum LivePhotoType {
+  apple,
 
-  apple,     // 苹果 Live Photo (HEIC/HEIF + MOV)import '../services/log_service.dart';import '../services/log_service.dart';
+  xiaomi,import '../services/alist_api_client.dart';
 
-  xiaomi,    // 小米动态照片 (JPG + MP4)
+  generic,
 
-  generic,   // 通用格式import '../services/file_download_service.dart';import '../services/file_download_service.dart';
+  unknownimport '../services/log_service.dart';import 'package:cached_network_image/cached_network_image.dart';import 'package:cached_network_image/cached_network_image.dart';
 
-  unknown    // 未知类型
+}
 
-}import '../services/media_cache_manager.dart';import '../services/media_cache_manager.dart';
-
-
+import '../services/file_download_service.dart';
 
 class LivePhotoViewerPage extends StatefulWidget {
 
-  final AlistApiClient apiClient;
+  final AlistApiClient apiClient;import '../services/media_cache_manager.dart';import 'package:wakelock_plus/wakelock_plus.dart';import 'package:wakelock_plus/wakelock_plus.dart';
 
-  final AlistFile file;// Live Photo 类型枚举class LivePhotoViewerPage extends StatefulWidget {
+  final AlistFile file;
 
   final AlistFile? videoFile;
 
-  enum LivePhotoType {  final AlistApiClient apiClient;
-
-  const LivePhotoViewerPage({
-
-    super.key,  apple,     // 苹果 Live Photo (HEIC/HEIF + MOV)  final AlistFile file;
-
-    required this.apiClient,
-
-    required this.file,  xiaomi,    // 小米动态照片 (JPG + MP4)  final AlistFile? videoFile; // 对应的视频文件（如果有）
-
-    this.videoFile,
-
-  });  generic,   // 通用格式  
-
   
 
-  @override  unknown    // 未知类型  const LivePhotoViewerPage({
+  const LivePhotoViewerPage({// Live Photo 类型枚举import '../services/alist_api_client.dart';import '../services/alist_api_client.dart';
 
-  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();
+    super.key,
 
-}}    super.key,
+    required this.apiClient,enum LivePhotoType {
 
+    required this.file,
 
+    this.videoFile,  apple,     // 苹果 Live Photo (HEIC/HEIF + MOV)import '../services/log_service.dart';import '../services/log_service.dart';
 
-class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {    required this.apiClient,
+  });
 
-  bool _showAppBar = true;
+    xiaomi,    // 小米动态照片 (JPG + MP4)
 
-  bool _isPlayingVideo = false;class LivePhotoViewerPage extends StatefulWidget {    required this.file,
+  @override
+
+  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();  generic,   // 通用格式import '../services/file_download_service.dart';import '../services/file_download_service.dart';
+
+}
+
+  unknown    // 未知类型
+
+class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {
+
+  bool _showAppBar = true;}import '../services/media_cache_manager.dart';import '../services/media_cache_manager.dart';
+
+  bool _isPlayingVideo = false;
 
   VideoPlayerController? _videoController;
 
-  bool _videoInitialized = false;  final AlistApiClient apiClient;    this.videoFile,
+  bool _videoInitialized = false;
 
-  bool _videoError = false;
+  bool _videoError = false;class LivePhotoViewerPage extends StatefulWidget {
 
-  String? _errorMessage;  final AlistFile file;  });
+  String? _errorMessage;
 
-  LivePhotoType _livePhotoType = LivePhotoType.unknown;
+  LivePhotoType _livePhotoType = LivePhotoType.unknown;  final AlistApiClient apiClient;
 
-    final AlistFile? videoFile; // 对应的视频文件（如果有）  
+  
 
-  @override
+  @override  final AlistFile file;// Live Photo 类型枚举class LivePhotoViewerPage extends StatefulWidget {
 
-  void initState() {    @override
+  void initState() {
 
-    super.initState();
+    super.initState();  final AlistFile? videoFile;
 
-    _detectLivePhotoType();  const LivePhotoViewerPage({  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();
+    _detectLivePhotoType();
 
-    if (widget.videoFile != null) {
+    if (widget.videoFile != null) {  enum LivePhotoType {  final AlistApiClient apiClient;
 
-      _initializeVideo();    super.key,}
+      _initializeVideo();
 
-    }
+    }  const LivePhotoViewerPage({
 
-    WakelockPlus.enable();    required this.apiClient,  final AlistApiClient apiClient;
+    WakelockPlus.enable();
 
-  }
+  }    super.key,  apple,     // 苹果 Live Photo (HEIC/HEIF + MOV)  final AlistFile file;
 
-      required this.file,  final AlistFile file;
+  
 
-  @override
+  @override    required this.apiClient,
 
-  void dispose() {    this.videoFile,  final AlistFile? videoFile; // 对应的视频文件（如果有）
+  void dispose() {
 
-    _videoController?.removeListener(_videoListener);
+    _videoController?.removeListener(_videoListener);    required this.file,  xiaomi,    // 小米动态照片 (JPG + MP4)  final AlistFile? videoFile; // 对应的视频文件（如果有）
 
-    _videoController?.dispose();  });  
+    _videoController?.dispose();
 
-    WakelockPlus.disable();
+    WakelockPlus.disable();    this.videoFile,
 
-    super.dispose();    const LivePhotoViewerPage({
+    super.dispose();
 
-  }
+  }  });  generic,   // 通用格式  
 
-    @override    super.key,
+  
 
-  void _detectLivePhotoType() {
+  void _detectLivePhotoType() {  
 
-    final fileName = widget.file.name.toLowerCase();  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();    required this.apiClient,
+    final fileName = widget.file.name.toLowerCase();
 
-    final videoFileName = widget.videoFile?.name.toLowerCase() ?? '';
+    final videoFileName = widget.videoFile?.name.toLowerCase() ?? '';  @override  unknown    // 未知类型  const LivePhotoViewerPage({
 
-    }    required this.file,
+    
 
-    if (fileName.contains('heic') || fileName.contains('heif')) {
+    if (fileName.contains('heic') || fileName.contains('heif')) {  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();
 
-      _livePhotoType = LivePhotoType.apple;    this.videoFile,
+      _livePhotoType = LivePhotoType.apple;
 
-    } else if (videoFileName.contains('mp4') && fileName.contains('jpg')) {
+    } else if (videoFileName.contains('mp4') && fileName.contains('jpg')) {}}    super.key,
 
-      _livePhotoType = LivePhotoType.xiaomi;class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {  });
+      _livePhotoType = LivePhotoType.xiaomi;
 
     } else {
 
-      _livePhotoType = LivePhotoType.generic;  bool _showAppBar = true;  
+      _livePhotoType = LivePhotoType.generic;
 
-    }
-
-      bool _isPlayingVideo = false;  @override
-
-    LogService.instance.info('Detected Live Photo type: $_livePhotoType', 'LivePhotoViewer');
-
-  }  VideoPlayerController? _videoController;  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();
-
-  
-
-  Future<void> _initializeVideo() async {  bool _videoInitialized = false;}
-
-    if (widget.videoFile == null) return;
-
-      bool _videoError = false;
-
-    try {
-
-      final videoUrl = await widget.apiClient.getDownloadUrl(widget.videoFile!);  String? _errorMessage;class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {
-
-      _videoController = VideoPlayerController.networkUrl(
-
-        Uri.parse(videoUrl),    bool _showAppBar = true;
-
-        httpHeaders: {
-
-          'User-Agent': 'Alist-Photo-Flutter-App',  // Live Photo 类型检测  bool _isPlayingVideo = false;
-
-        },
-
-      );  LivePhotoType _livePhotoType = LivePhotoType.unknown;  VideoPlayerController? _videoController;
-
-      
-
-      await _videoController!.initialize();    bool _videoInitialized = false;
-
-      
-
-      switch (_livePhotoType) {  @override  bool _videoError = false;
-
-        case LivePhotoType.apple:
-
-          _videoController!.setLooping(false);  void initState() {  String? _errorMessage;
-
-          break;
-
-        case LivePhotoType.xiaomi:    super.initState();  
-
-          _videoController!.setLooping(true);
-
-          break;    _detectLivePhotoType();  // Live Photo 类型检测
-
-        default:
-
-          _videoController!.setLooping(true);    if (widget.videoFile != null) {  LivePhotoType _livePhotoType = LivePhotoType.unknown;
-
-          break;
-
-      }      _initializeVideo();  
-
-      
-
-      _videoController!.addListener(_videoListener);    }  @override
-
-      
-
-      setState(() {      void initState() {
-
-        _videoInitialized = true;
-
-        _videoError = false;    // 保持屏幕常亮    super.initState();
-
-        _errorMessage = null;
-
-      });    WakelockPlus.enable();    _detectLivePhotoType();
-
-      
-
-      LogService.instance.info('Live Photo video initialized successfully', 'LivePhotoViewer');  }    if (widget.videoFile != null) {
-
-    } catch (e) {
-
-      LogService.instance.error('Failed to initialize Live Photo video: $e', 'LivePhotoViewer');        _initializeVideo();
-
-      setState(() {
-
-        _videoError = true;  @override    }
-
-        _errorMessage = e.toString();
-
-      });  void dispose() {    
-
-    }
-
-  }    _videoController?.removeListener(_videoListener);    // 保持屏幕常亮
-
-  
-
-  void _videoListener() {    _videoController?.dispose();    WakelockPlus.enable();
-
-    if (_videoController == null) return;
-
-        WakelockPlus.disable();  }
-
-    if (_livePhotoType == LivePhotoType.apple && 
-
-        _videoController!.value.position >= _videoController!.value.duration) {    super.dispose();  
-
-      setState(() {
-
-        _isPlayingVideo = false;  }  @override
-
-      });
-
-    }    void dispose() {
-
-  }
-
-    void _detectLivePhotoType() {    _videoController?.dispose();
-
-  void _toggleAppBar() {
-
-    setState(() {    final fileName = widget.file.name.toLowerCase();    WakelockPlus.disable();
-
-      _showAppBar = !_showAppBar;
-
-    });    final videoFileName = widget.videoFile?.name.toLowerCase() ?? '';    super.dispose();
-
-  }
-
-        }
-
-  void _togglePlayback() {
-
-    if (_videoController == null || !_videoInitialized || _videoError) return;    if (fileName.contains('heic') || fileName.contains('heif')) {  
+    }class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {    required this.apiClient,
 
     
 
-    setState(() {      _livePhotoType = LivePhotoType.apple;  void _detectLivePhotoType() {
-
-      if (_isPlayingVideo) {
-
-        _videoController!.pause();    } else if (videoFileName.contains('mp4') && fileName.contains('jpg')) {    final fileName = widget.file.name.toLowerCase();
-
-        _isPlayingVideo = false;
-
-              _livePhotoType = LivePhotoType.xiaomi;    final videoFileName = widget.videoFile?.name.toLowerCase() ?? '';
-
-        if (_livePhotoType == LivePhotoType.apple) {
-
-          _videoController!.seekTo(Duration.zero);    } else {    
-
-        }
-
-      } else {      _livePhotoType = LivePhotoType.generic;    if (fileName.contains('heic') || fileName.contains('heif')) {
-
-        if (_livePhotoType == LivePhotoType.apple) {
-
-          _videoController!.seekTo(Duration.zero);    }      _livePhotoType = LivePhotoType.apple;
-
-        }
-
-                } else if (videoFileName.contains('mp4') && fileName.contains('jpg')) {
-
-        _videoController!.play();
-
-        _isPlayingVideo = true;    LogService.instance.info('Detected Live Photo type: $_livePhotoType', 'LivePhotoViewer');      _livePhotoType = LivePhotoType.xiaomi;
-
-      }
-
-    });  }    } else {
-
-    
-
-    HapticFeedback.lightImpact();        _livePhotoType = LivePhotoType.generic;
+    LogService.instance.info('Detected Live Photo type: $_livePhotoType', 'LivePhotoViewer');  bool _showAppBar = true;
 
   }
 
-    Future<void> _initializeVideo() async {    }
+    bool _isPlayingVideo = false;class LivePhotoViewerPage extends StatefulWidget {    required this.file,
 
-  Future<void> _downloadFile() async {
+  Future<void> _initializeVideo() async {
 
-    try {    if (widget.videoFile == null) return;    
+    if (widget.videoFile == null) return;  VideoPlayerController? _videoController;
 
-      final downloadUrl = await widget.apiClient.getDownloadUrl(widget.file);
+    
 
-              LogService.instance.info('Detected Live Photo type: $_livePhotoType', 'LivePhotoViewer');
+    try {  bool _videoInitialized = false;  final AlistApiClient apiClient;    this.videoFile,
 
-      await FileDownloadService.instance.downloadFile(
+      final videoUrl = await widget.apiClient.getDownloadUrl(widget.videoFile!);
 
-        url: downloadUrl,    try {  }
+      _videoController = VideoPlayerController.networkUrl(  bool _videoError = false;
 
-        fileName: widget.file.name,
+        Uri.parse(videoUrl),
 
-        onProgress: (received, total) {},      LogService.instance.info('Initializing Live Photo video: ${widget.videoFile!.name}', 'LivePhotoViewer');  
+        httpHeaders: {  String? _errorMessage;  final AlistFile file;  });
+
+          'User-Agent': 'Alist-Photo-Flutter-App',
+
+        },  LivePhotoType _livePhotoType = LivePhotoType.unknown;
 
       );
 
-              Future<void> _initializeVideo() async {
+          final AlistFile? videoFile; // 对应的视频文件（如果有）  
+
+      await _videoController!.initialize();
+
+        @override
+
+      switch (_livePhotoType) {
+
+        case LivePhotoType.apple:  void initState() {    @override
+
+          _videoController!.setLooping(false);
+
+          break;    super.initState();
+
+        case LivePhotoType.xiaomi:
+
+          _videoController!.setLooping(true);    _detectLivePhotoType();  const LivePhotoViewerPage({  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();
+
+          break;
+
+        default:    if (widget.videoFile != null) {
+
+          _videoController!.setLooping(true);
+
+          break;      _initializeVideo();    super.key,}
+
+      }
+
+          }
+
+      _videoController!.addListener(_videoListener);
+
+          WakelockPlus.enable();    required this.apiClient,  final AlistApiClient apiClient;
+
+      setState(() {
+
+        _videoInitialized = true;  }
+
+        _videoError = false;
+
+        _errorMessage = null;      required this.file,  final AlistFile file;
+
+      });
+
+        @override
+
+    } catch (e) {
+
+      LogService.instance.error('Failed to initialize Live Photo video: $e', 'LivePhotoViewer');  void dispose() {    this.videoFile,  final AlistFile? videoFile; // 对应的视频文件（如果有）
+
+      setState(() {
+
+        _videoError = true;    _videoController?.removeListener(_videoListener);
+
+        _errorMessage = e.toString();
+
+      });    _videoController?.dispose();  });  
+
+    }
+
+  }    WakelockPlus.disable();
+
+  
+
+  void _videoListener() {    super.dispose();    const LivePhotoViewerPage({
+
+    if (_videoController == null) return;
+
+      }
+
+    if (_livePhotoType == LivePhotoType.apple && 
+
+        _videoController!.value.position >= _videoController!.value.duration) {    @override    super.key,
+
+      setState(() {
+
+        _isPlayingVideo = false;  void _detectLivePhotoType() {
+
+      });
+
+    }    final fileName = widget.file.name.toLowerCase();  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();    required this.apiClient,
+
+  }
+
+      final videoFileName = widget.videoFile?.name.toLowerCase() ?? '';
+
+  void _toggleAppBar() {
+
+    setState(() {    }    required this.file,
+
+      _showAppBar = !_showAppBar;
+
+    });    if (fileName.contains('heic') || fileName.contains('heif')) {
+
+  }
+
+        _livePhotoType = LivePhotoType.apple;    this.videoFile,
+
+  void _togglePlayback() {
+
+    if (_videoController == null || !_videoInitialized || _videoError) return;    } else if (videoFileName.contains('mp4') && fileName.contains('jpg')) {
+
+    
+
+    setState(() {      _livePhotoType = LivePhotoType.xiaomi;class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {  });
+
+      if (_isPlayingVideo) {
+
+        _videoController!.pause();    } else {
+
+        _isPlayingVideo = false;
+
+              _livePhotoType = LivePhotoType.generic;  bool _showAppBar = true;  
+
+        if (_livePhotoType == LivePhotoType.apple) {
+
+          _videoController!.seekTo(Duration.zero);    }
+
+        }
+
+      } else {      bool _isPlayingVideo = false;  @override
+
+        if (_livePhotoType == LivePhotoType.apple) {
+
+          _videoController!.seekTo(Duration.zero);    LogService.instance.info('Detected Live Photo type: $_livePhotoType', 'LivePhotoViewer');
+
+        }
+
+          }  VideoPlayerController? _videoController;  State<LivePhotoViewerPage> createState() => _LivePhotoViewerPageState();
+
+        _videoController!.play();
+
+        _isPlayingVideo = true;  
+
+      }
+
+    });  Future<void> _initializeVideo() async {  bool _videoInitialized = false;}
+
+    
+
+    HapticFeedback.lightImpact();    if (widget.videoFile == null) return;
+
+  }
+
+        bool _videoError = false;
+
+  Future<void> _downloadFile() async {
+
+    try {    try {
+
+      final downloadUrl = await widget.apiClient.getDownloadUrl(widget.file);
+
+            final videoUrl = await widget.apiClient.getDownloadUrl(widget.videoFile!);  String? _errorMessage;class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {
+
+      await FileDownloadService.instance.downloadFile(
+
+        url: downloadUrl,      _videoController = VideoPlayerController.networkUrl(
+
+        fileName: widget.file.name,
+
+        onProgress: (received, total) {},        Uri.parse(videoUrl),    bool _showAppBar = true;
+
+      );
+
+              httpHeaders: {
 
       if (mounted) {
 
-        ScaffoldMessenger.of(context).showSnackBar(      final videoUrl = await widget.apiClient.getDownloadUrl(widget.videoFile!);    if (widget.videoFile == null) return;
+        ScaffoldMessenger.of(context).showSnackBar(          'User-Agent': 'Alist-Photo-Flutter-App',  // Live Photo 类型检测  bool _isPlayingVideo = false;
+
+          SnackBar(content: Text('${widget.file.name} 下载完成')),
+
+        );        },
+
+      }
+
+    } catch (e) {      );  LivePhotoType _livePhotoType = LivePhotoType.unknown;  VideoPlayerController? _videoController;
+
+      if (mounted) {
+
+        ScaffoldMessenger.of(context).showSnackBar(      
+
+          SnackBar(
+
+            content: Text('下载失败: $e'),      await _videoController!.initialize();    bool _videoInitialized = false;
+
+            backgroundColor: Colors.red,
+
+          ),      
+
+        );
+
+      }      switch (_livePhotoType) {  @override  bool _videoError = false;
+
+    }
+
+  }        case LivePhotoType.apple:
+
+  
+
+  Widget _buildContent() {          _videoController!.setLooping(false);  void initState() {  String? _errorMessage;
+
+    if (_videoError) {
+
+      return Container(          break;
+
+        color: Colors.black,
+
+        child: const Center(        case LivePhotoType.xiaomi:    super.initState();  
+
+          child: Column(
+
+            mainAxisAlignment: MainAxisAlignment.center,          _videoController!.setLooping(true);
+
+            children: [
+
+              Icon(Icons.error_outline, color: Colors.red, size: 48),          break;    _detectLivePhotoType();  // Live Photo 类型检测
+
+              SizedBox(height: 16),
+
+              Text('动态照片加载失败', style: TextStyle(color: Colors.white, fontSize: 18)),        default:
+
+            ],
+
+          ),          _videoController!.setLooping(true);    if (widget.videoFile != null) {  LivePhotoType _livePhotoType = LivePhotoType.unknown;
+
+        ),
+
+      );          break;
+
+    }
+
+      }      _initializeVideo();  
+
+    if (_isPlayingVideo && _videoController != null && _videoInitialized) {
+
+      return Container(      
+
+        color: Colors.black,
+
+        child: Center(      _videoController!.addListener(_videoListener);    }  @override
+
+          child: AspectRatio(
+
+            aspectRatio: _videoController!.value.aspectRatio.isNaN       
+
+                ? 16 / 9 
+
+                : _videoController!.value.aspectRatio,      setState(() {      void initState() {
+
+            child: VideoPlayer(_videoController!),
+
+          ),        _videoInitialized = true;
+
+        ),
+
+      );        _videoError = false;    // 保持屏幕常亮    super.initState();
+
+    }
+
+        _errorMessage = null;
+
+    return FutureBuilder<String>(
+
+      future: widget.apiClient.getDownloadUrl(widget.file),      });    WakelockPlus.enable();    _detectLivePhotoType();
+
+      builder: (context, snapshot) {
+
+        if (snapshot.hasData) {      
+
+          return PhotoView(
+
+            imageProvider: CachedNetworkImageProvider(      LogService.instance.info('Live Photo video initialized successfully', 'LivePhotoViewer');  }    if (widget.videoFile != null) {
+
+              snapshot.data!,
+
+              cacheManager: MediaCacheManager.instance.originalCache,    } catch (e) {
+
+            ),
+
+            initialScale: PhotoViewComputedScale.contained,      LogService.instance.error('Failed to initialize Live Photo video: $e', 'LivePhotoViewer');        _initializeVideo();
+
+            minScale: PhotoViewComputedScale.contained * 0.5,
+
+            maxScale: PhotoViewComputedScale.covered * 3.0,      setState(() {
+
+            heroAttributes: PhotoViewHeroAttributes(
+
+              tag: 'live_photo_${widget.file.name}',        _videoError = true;  @override    }
+
+            ),
+
+            loadingBuilder: (context, event) => Container(        _errorMessage = e.toString();
+
+              color: Colors.black,
+
+              child: const Center(      });  void dispose() {    
+
+                child: CircularProgressIndicator(
+
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),    }
+
+                ),
+
+              ),  }    _videoController?.removeListener(_videoListener);    // 保持屏幕常亮
+
+            ),
+
+            errorBuilder: (context, error, stackTrace) => Container(  
+
+              color: Colors.black,
+
+              child: const Center(  void _videoListener() {    _videoController?.dispose();    WakelockPlus.enable();
+
+                child: Column(
+
+                  mainAxisAlignment: MainAxisAlignment.center,    if (_videoController == null) return;
+
+                  children: [
+
+                    Icon(Icons.error_outline, color: Colors.red, size: 48),        WakelockPlus.disable();  }
+
+                    SizedBox(height: 16),
+
+                    Text('无法加载照片', style: TextStyle(color: Colors.white, fontSize: 16)),    if (_livePhotoType == LivePhotoType.apple && 
+
+                  ],
+
+                ),        _videoController!.value.position >= _videoController!.value.duration) {    super.dispose();  
+
+              ),
+
+            ),      setState(() {
+
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
+
+          );        _isPlayingVideo = false;  }  @override
+
+        } else {
+
+          return Container(      });
+
+            color: Colors.black,
+
+            child: const Center(    }    void dispose() {
+
+              child: CircularProgressIndicator(
+
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),  }
+
+              ),
+
+            ),    void _detectLivePhotoType() {    _videoController?.dispose();
+
+          );
+
+        }  void _toggleAppBar() {
+
+      },
+
+    );    setState(() {    final fileName = widget.file.name.toLowerCase();    WakelockPlus.disable();
+
+  }
+
+        _showAppBar = !_showAppBar;
+
+  @override
+
+  Widget build(BuildContext context) {    });    final videoFileName = widget.videoFile?.name.toLowerCase() ?? '';    super.dispose();
+
+    return Scaffold(
+
+      backgroundColor: Colors.black,  }
+
+      appBar: _showAppBar
+
+          ? AppBar(        }
+
+              backgroundColor: Colors.black.withOpacity(0.7),
+
+              foregroundColor: Colors.white,  void _togglePlayback() {
+
+              title: Text(
+
+                widget.file.name,    if (_videoController == null || !_videoInitialized || _videoError) return;    if (fileName.contains('heic') || fileName.contains('heif')) {  
+
+                style: const TextStyle(color: Colors.white),
+
+                overflow: TextOverflow.ellipsis,    
+
+              ),
+
+              centerTitle: true,    setState(() {      _livePhotoType = LivePhotoType.apple;  void _detectLivePhotoType() {
+
+              elevation: 0,
+
+              actions: [      if (_isPlayingVideo) {
+
+                if (widget.videoFile != null)
+
+                  IconButton(        _videoController!.pause();    } else if (videoFileName.contains('mp4') && fileName.contains('jpg')) {    final fileName = widget.file.name.toLowerCase();
+
+                    icon: Icon(_isPlayingVideo ? Icons.pause : Icons.play_arrow),
+
+                    onPressed: _togglePlayback,        _isPlayingVideo = false;
+
+                  ),
+
+                IconButton(              _livePhotoType = LivePhotoType.xiaomi;    final videoFileName = widget.videoFile?.name.toLowerCase() ?? '';
+
+                  icon: const Icon(Icons.download),
+
+                  onPressed: _downloadFile,        if (_livePhotoType == LivePhotoType.apple) {
+
+                ),
+
+              ],          _videoController!.seekTo(Duration.zero);    } else {    
+
+            )
+
+          : null,        }
+
+      body: Stack(
+
+        children: [      } else {      _livePhotoType = LivePhotoType.generic;    if (fileName.contains('heic') || fileName.contains('heif')) {
+
+          Positioned.fill(
+
+            child: GestureDetector(        if (_livePhotoType == LivePhotoType.apple) {
+
+              onTap: _toggleAppBar,
+
+              onLongPress: widget.videoFile != null ? _togglePlayback : null,          _videoController!.seekTo(Duration.zero);    }      _livePhotoType = LivePhotoType.apple;
+
+              child: _buildContent(),
+
+            ),        }
+
+          ),
+
+                          } else if (videoFileName.contains('mp4') && fileName.contains('jpg')) {
+
+          if (widget.videoFile != null)
+
+            Positioned(        _videoController!.play();
+
+              top: 16,
+
+              right: 16,        _isPlayingVideo = true;    LogService.instance.info('Detected Live Photo type: $_livePhotoType', 'LivePhotoViewer');      _livePhotoType = LivePhotoType.xiaomi;
+
+              child: AnimatedOpacity(
+
+                opacity: _showAppBar ? 1.0 : 0.3,      }
+
+                duration: const Duration(milliseconds: 300),
+
+                child: Container(    });  }    } else {
+
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+
+                  decoration: BoxDecoration(    
+
+                    color: Colors.black54,
+
+                    borderRadius: BorderRadius.circular(20),    HapticFeedback.lightImpact();        _livePhotoType = LivePhotoType.generic;
+
+                  ),
+
+                  child: Row(  }
+
+                    mainAxisSize: MainAxisSize.min,
+
+                    children: [    Future<void> _initializeVideo() async {    }
+
+                      Icon(
+
+                        _isPlayingVideo ? Icons.motion_photos_on : Icons.motion_photos_paused,  Future<void> _downloadFile() async {
+
+                        color: _isPlayingVideo ? Colors.blue : Colors.white70,
+
+                        size: 16,    try {    if (widget.videoFile == null) return;    
+
+                      ),
+
+                      const SizedBox(width: 4),      final downloadUrl = await widget.apiClient.getDownloadUrl(widget.file);
+
+                      Text(
+
+                        'LIVE',              LogService.instance.info('Detected Live Photo type: $_livePhotoType', 'LivePhotoViewer');
+
+                        style: TextStyle(
+
+                          color: _isPlayingVideo ? Colors.blue : Colors.white70,      await FileDownloadService.instance.downloadFile(
+
+                          fontSize: 12,
+
+                          fontWeight: FontWeight.bold,        url: downloadUrl,    try {  }
+
+                        ),
+
+                      ),        fileName: widget.file.name,
+
+                    ],
+
+                  ),        onProgress: (received, total) {},      LogService.instance.info('Initializing Live Photo video: ${widget.videoFile!.name}', 'LivePhotoViewer');  
+
+                ),
+
+              ),      );
+
+            ),
+
+        ],              Future<void> _initializeVideo() async {
+
+      ),
+
+    );      if (mounted) {
+
+  }
+
+}        ScaffoldMessenger.of(context).showSnackBar(      final videoUrl = await widget.apiClient.getDownloadUrl(widget.videoFile!);    if (widget.videoFile == null) return;
 
           SnackBar(content: Text('${widget.file.name} 下载完成')),
 
