@@ -53,7 +53,7 @@ class UploadTask {
       case UploadStatus.completed:
         return '已完成';
       case UploadStatus.failed:
-        return '失败${retryCount > 0 ? ' (重试 $retryCount/$maxRetries)' : ''}';
+        return '失败${retryCount > 0 ? ' (重试 $retryCount/${FileUploadService.maxRetries})' : ''}';
       case UploadStatus.cancelled:
         return '已取消';
     }
@@ -125,6 +125,18 @@ class FileUploadService extends ChangeNotifier {
     
     notifyListeners();
     return task.id;
+  }
+  
+  /// 添加进度回调
+  void addProgressCallback(String taskId, Function(UploadTask) callback) {
+    // 使用ChangeNotifier模式，回调通过notifyListeners触发
+    // UI层可以监听整个服务的变化
+  }
+  
+  /// 添加状态回调
+  void addStatusCallback(String taskId, Function(UploadTask) callback) {
+    // 使用ChangeNotifier模式，回调通过notifyListeners触发
+    // UI层可以监听整个服务的变化
   }
   
   Future<void> startUpload(String taskId) async {

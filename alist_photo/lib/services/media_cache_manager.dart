@@ -2,8 +2,6 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as path;
 import 'log_service.dart';
 
 class MediaCacheManager {
@@ -18,7 +16,6 @@ class MediaCacheManager {
   final Map<String, CacheAccessInfo> _accessLog = {};
   
   static const String _accessLogKey = 'cache_access_log';
-  static const String _cacheSettingsKey = 'cache_settings';
   
   MediaCacheManager._() {
     _initializeCaches();
@@ -216,6 +213,7 @@ class MediaCacheManager {
         // 低优先级异步下载
         cacheManager.downloadFile(url, key: cacheKey).catchError((e) {
           LogService.instance.warning('Background preload failed: $url, error: $e', 'MediaCacheManager');
+          return null; // 返回一个默认值
         });
         LogService.instance.debug('Background preload started: $url', 'MediaCacheManager');
       }
@@ -286,34 +284,30 @@ class MediaCacheManager {
   
   Future<Map<String, int>> _getCacheManagerStats(CacheManager cacheManager, String type) async {
     try {
-      // 获取缓存目录
-      final cacheDir = await cacheManager.store.retrieveCacheData();
-      if (cacheDir == null || cacheDir.isEmpty) {
+      // 简化实现，直接计算缓存目录大小
+      final directory = await cacheManager.store.fileSystem.rootDir;
+      if (!await directory.exists()) {
         return {'count': 0, 'size': 0};
       }
       
-      int count = cacheDir.length;
+      final files = directory.listSync(recursive: true);
+      int count = 0;
       int totalSize = 0;
       
-      // 计算总大小（简化实现）
-      for (final cacheObject in cacheDir) {
-        try {
-          final file = cacheObject.file;
-          if (await file.exists()) {
-            final size = await file.length();
-            totalSize += size;
-          }
-        } catch (e) {
-          // 忽略单个文件的错误
+      for (final file in files) {
+        if (file is File) {
+          count++;
+          totalSize += await file.length();
         }
       }
       
-      LogService.instance.debug('Cache stats for $type: $count files, ${totalSize} bytes', 'MediaCacheManager');
+      LogService.instance.debug('Cache stats for $type: $count files, $totalSize bytes', 'MediaCacheManager');
       return {'count': count, 'size': totalSize};
     } catch (e) {
       LogService.instance.warning('Failed to get cache manager stats for $type: $e', 'MediaCacheManager');
       return {'count': 0, 'size': 0};
     }
+  }
   }
   
   /// 清理指定类型的缓存
@@ -412,7 +406,6 @@ class MediaCacheManager {
     
     return sortedByTime.take(limit).toList();
   }
-    }
 }
 
 class CacheStats {

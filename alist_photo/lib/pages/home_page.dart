@@ -1181,34 +1181,4 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-  
-  Future<void> _downloadFile(AlistFile file) async {
-    try {
-      final downloadUrl = await widget.apiClient.getDownloadUrl(file);
-      
-      await FileDownloadService.instance.downloadFile(
-        url: downloadUrl,
-        fileName: file.name,
-        onProgress: (received, total) {
-          LogService.instance.debug('Download progress: ${((received / total) * 100).toStringAsFixed(1)}%', 'HomePage');
-        },
-      );
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${file.name} 下载完成')),
-        );
-      }
-    } catch (e) {
-      LogService.instance.error('Download failed: $e', 'HomePage');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('下载失败: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
 }
