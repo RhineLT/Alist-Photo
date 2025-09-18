@@ -1,6 +1,9 @@
 import "package:flutter/material.dart";
 import "services/alist_api_client.dart";
 import "services/log_service.dart";
+import "services/media_cache_manager.dart";
+import 'dart:io';
+import "package:permission_handler/permission_handler.dart";
 import "pages/home_page.dart";
 
 void main() async {
@@ -34,7 +37,23 @@ class _MyAppState extends State<MyApp> {
   Future<void> _initializeApp() async {
     try {
       LogService.instance.info('Initializing Alist API client', 'Main');
+      // 先检查/请求存储权限（Android <= 29 需要；>=30 写 app-scoped 目录不强制，但这里统一 gating）
+      bool granted = true;
+      if (Platform.isAndroid) {
+        final status = await Permission.storage.status;
+        if (!status.isGranted) {
+          final req = await Permission.storage.request();
+          granted = req.isGranted;
+        }
+      }
+
+      if (!granted) {
+        LogService.instance.warning('Storage permission not granted. App will request again later.', 'Main');
+      }
+
       await _apiClient.initialize();
+      // 初始化外部文件缓存（内部也会最小化处理权限）
+      await MediaCacheManager.instance.initialize();
       
       setState(() {
         _isInitialized = true;

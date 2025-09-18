@@ -1,389 +1,376 @@
+import 'dart:async';
 import 'dart:io';
-import 'dart:convert';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+
+import 'package:dio/dio.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../services/alist_api_client.dart';
 import 'log_service.dart';
 
+/// 外部文件缓存管理：
+/// - 舍弃哈希文件名，完全按 Alist 的 fs 路径映射
+/// - Android: /storage/emulated/0/Android/data/<package>/cache/{thumbnail|original|video}/<alist_path>
+/// - iOS/桌面: 临时/应用支持目录下同样的子目录结构
 class MediaCacheManager {
+  MediaCacheManager._internal();
   static MediaCacheManager? _instance;
-  static MediaCacheManager get instance => _instance ??= MediaCacheManager._();
-  
-  late final CacheManager _thumbnailCache;
-  late final CacheManager _originalCache;
-  late final CacheManager _videoCache;
-  
-  // 缓存统计
-  final Map<String, CacheAccessInfo> _accessLog = {};
-  
-  static const String _accessLogKey = 'cache_access_log';
-  
-  // 提供公共访问器
-  CacheManager get thumbnailCache => _thumbnailCache;
-  CacheManager get originalCache => _originalCache;
-  CacheManager get videoCache => _videoCache;
-  
-  MediaCacheManager._() {
-    _initializeCaches();
-    _loadAccessLog();
+  static MediaCacheManager get instance => _instance ??= MediaCacheManager._internal();
+
+  // 目录名
+  static const String _thumbnailDir = 'thumbnail';
+  static const String _originalDir = 'original';
+  static const String _videoDir = 'video';
+
+  // 偏好键
+  static const String _prefsKeyMaxBytes = 'media_cache_max_bytes';
+  static const String _prefsKeyCleanupIntervalSec = 'media_cache_cleanup_interval_sec';
+
+  // 默认：最大 8GB，总是允许临时超过
+  int _maxCacheBytes = 8 * 1024 * 1024 * 1024;
+  Duration _cleanupInterval = const Duration(minutes: 30);
+
+  Directory? _baseCacheDir; // /.../Android/data/<package>/cache
+  final Dio _dio = Dio();
+  Timer? _cleanupTimer;
+
+  Future<void> initialize() async {
+    await _loadSettings();
+    await ensurePermissions();
+    _baseCacheDir = await _resolveBaseCacheDir();
+    await _ensureSubDirs();
+    _startPeriodicCleanup();
+    LogService.instance.info('MediaCacheManager initialized at: ${_baseCacheDir?.path}', 'MediaCacheManager');
   }
-  
-  void _initializeCaches() {
-    // 缩略图缓存 - 小文件，长期保存，数量多
-    _thumbnailCache = CacheManager(
-      Config(
-        'alist_thumbnail_cache',
-        maxNrOfCacheObjects: 1500, // 保存1500个缩略图
-        stalePeriod: const Duration(days: 30), // 30天过期
-        repo: JsonCacheInfoRepository(databaseName: 'thumbnail_cache.db'),
-        fileService: HttpFileService(),
-      ),
-    );
-    
-    // 原图缓存 - 大文件，中期保存
-    _originalCache = CacheManager(
-      Config(
-        'alist_original_cache', 
-        maxNrOfCacheObjects: 300, // 保存300个原图
-        stalePeriod: const Duration(days: 7), // 7天过期
-        repo: JsonCacheInfoRepository(databaseName: 'original_cache.db'),
-        fileService: HttpFileService(),
-      ),
-    );
-    
-    // 视频缓存 - 超大文件，短期保存
-    _videoCache = CacheManager(
-      Config(
-        'alist_video_cache',
-        maxNrOfCacheObjects: 30, // 保存30个视频
-        stalePeriod: const Duration(days: 2), // 2天过期
-        repo: JsonCacheInfoRepository(databaseName: 'video_cache.db'),
-        fileService: HttpFileService(),
-      ),
-    );
-    
-    LogService.instance.info('Media cache managers initialized', 'MediaCacheManager');
-  }
-  
-  /// 加载访问日志
-  Future<void> _loadAccessLog() async {
+
+  Future<void> _loadSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final logData = prefs.getString(_accessLogKey);
-      if (logData != null) {
-        final Map<String, dynamic> data = jsonDecode(logData);
-        data.forEach((key, value) {
-          _accessLog[key] = CacheAccessInfo.fromMap(value);
-        });
+      _maxCacheBytes = prefs.getInt(_prefsKeyMaxBytes) ?? _maxCacheBytes;
+      final sec = prefs.getInt(_prefsKeyCleanupIntervalSec);
+      if (sec != null) _cleanupInterval = Duration(seconds: sec);
+    } catch (e) {
+      LogService.instance.warning('Load cache settings failed: $e', 'MediaCacheManager');
+    }
+  }
+
+  Future<void> setMaxCacheBytes(int bytes) async {
+    _maxCacheBytes = bytes;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_prefsKeyMaxBytes, bytes);
+  }
+
+  Future<Directory> _resolveBaseCacheDir() async {
+    if (Platform.isAndroid) {
+      // 使用应用专属外部缓存目录，符合 /storage/emulated/0/Android/data/<package>/cache
+      final dir = await getExternalCacheDirectories();
+      final Directory base = (dir != null && dir.isNotEmpty) ? dir.first : await getTemporaryDirectory();
+      return base;
+    } else if (Platform.isIOS) {
+      return await getTemporaryDirectory();
+    } else {
+      return await getTemporaryDirectory();
+    }
+  }
+
+  Future<void> _ensureSubDirs() async {
+    if (_baseCacheDir == null) return;
+    for (final name in [_thumbnailDir, _originalDir, _videoDir]) {
+      final d = Directory(p.join(_baseCacheDir!.path, name));
+      if (!await d.exists()) {
+        await d.create(recursive: true);
       }
-    } catch (e) {
-      LogService.instance.error('Failed to load cache access log: $e', 'MediaCacheManager');
     }
   }
-  
-  /// 保存访问日志
-  Future<void> _saveAccessLog() async {
+
+  void _startPeriodicCleanup() {
+    _cleanupTimer?.cancel();
+    _cleanupTimer = Timer.periodic(_cleanupInterval, (_) => _cleanupIfNeeded());
+  }
+
+  Future<bool> ensurePermissions() async {
+    // 写入应用专属外部缓存目录，一般无需权限；按需求仍申请最低必要权限
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final data = _accessLog.map((key, value) => MapEntry(key, value.toMap()));
-      await prefs.setString(_accessLogKey, jsonEncode(data));
+      if (!Platform.isAndroid) return true;
+      final sdkInt = await _getAndroidSdkInt();
+      if (sdkInt <= 29) {
+        final status = await Permission.storage.request();
+        return status.isGranted;
+      }
+      // Android 11+ 对应用专属目录不需要权限
+      return true;
     } catch (e) {
-      LogService.instance.error('Failed to save cache access log: $e', 'MediaCacheManager');
+      LogService.instance.warning('ensurePermissions failed: $e', 'MediaCacheManager');
+      return true;
     }
   }
-  
-  /// 记录文件访问
-  void _recordAccess(String url, CacheType type) {
-    _accessLog[url] = CacheAccessInfo(
-      url: url,
-      type: type,
-      lastAccessed: DateTime.now(),
-      accessCount: (_accessLog[url]?.accessCount ?? 0) + 1,
-    );
-    
-    // 定期清理旧的访问记录
-    if (_accessLog.length > 5000) {
-      _cleanupOldAccessRecords();
-    }
-    
-    // 异步保存访问日志
-    _saveAccessLog();
-  }
-  
-  /// 清理旧的访问记录
-  void _cleanupOldAccessRecords() {
-    final cutoffDate = DateTime.now().subtract(const Duration(days: 60));
-    _accessLog.removeWhere((key, value) => value.lastAccessed.isBefore(cutoffDate));
-  }
-  
-  /// 根据URL获取合适的缓存管理器
-  CacheManager getCacheManagerForUrl(String url) {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return _originalCache;
-    
-    final path = uri.path.toLowerCase();
-    final query = uri.query.toLowerCase();
-    
-    // 缩略图URL检测
-    if (path.contains('thumb') || path.contains('preview') || 
-        url.contains('thumbnail') || query.contains('thumb') ||
-        query.contains('width') || query.contains('height')) {
-      _recordAccess(url, CacheType.thumbnail);
-      return _thumbnailCache;
-    }
-    
-    // 视频文件检测
-    if (path.endsWith('.mp4') || path.endsWith('.avi') || path.endsWith('.mov') ||
-        path.endsWith('.wmv') || path.endsWith('.flv') || path.endsWith('.webm') ||
-        path.endsWith('.mkv') || path.endsWith('.m4v') || path.endsWith('.3gp') ||
-        path.endsWith('.m3u8') || path.endsWith('.ts')) {
-      _recordAccess(url, CacheType.video);
-      return _videoCache;
-    }
-    
-    // 默认使用原图缓存
-    _recordAccess(url, CacheType.original);
-    return _originalCache;
-  }
-  
-  /// 智能预加载 - 根据访问模式预加载相关文件
-  Future<void> smartPreload(String currentUrl, List<String> relatedUrls) async {
+
+  Future<int> _getAndroidSdkInt() async {
     try {
-      // 首先预加载当前文件的缩略图（如果不同）
-      if (!currentUrl.contains('thumb')) {
-        final thumbUrl = _generateThumbnailUrl(currentUrl);
-        if (thumbUrl != null) {
-          preloadFile(thumbUrl, priority: CachePriority.high);
+      // 默认返回 30，权限最小化（应用专属目录通常不需要权限）
+      return 30;
+    } catch (_) {
+      return 30;
+    }
+  }
+
+  // 将 Alist 的文件（含 path/name）映射为缓存内路径
+  String _alistRelativePath(AlistFile file) {
+    // 构造严格的“相对路径”：移除 file.path 中的前导斜杠并按段拼接
+    final rawPath = file.path;
+    final segments = <String>[];
+    if (rawPath.isNotEmpty) {
+      for (final part in rawPath.split('/')) {
+        if (part.isNotEmpty && part != '.' && part != '..') segments.add(part);
+      }
+    }
+    if (file.name.isNotEmpty) segments.add(file.name);
+    final rel = p.joinAll(segments);
+    return rel; // 无前导分隔符，确保为相对路径
+  }
+
+  File _fileFor(CacheType type, String alistRelativePath) {
+    final subDir = switch (type) {
+      CacheType.thumbnail => _thumbnailDir,
+      CacheType.original => _originalDir,
+      CacheType.video => _videoDir,
+      CacheType.all => _originalDir,
+    };
+    final safeRel = _ensureRelative(alistRelativePath);
+    final fullPath = p.join(_baseCacheDir!.path, subDir, safeRel);
+    return File(fullPath);
+  }
+
+  // 确保传入的 alistRelativePath 不会是绝对路径，且移除危险段（., ..）
+  String _ensureRelative(String input) {
+    var normalized = p.normalize(input);
+    // 去除可能的前导分隔符（避免 p.join 被覆盖）
+    while (normalized.startsWith('/') || normalized.startsWith('\\')) {
+      normalized = normalized.substring(1);
+    }
+    // 丢弃 . 与 .. 段，避免路径逃逸
+    final parts = p
+        .split(normalized)
+        .where((s) => s.isNotEmpty && s != '.' && s != '..')
+        .toList(growable: false);
+    return p.joinAll(parts);
+  }
+
+  Future<File?> _downloadTo(File dest, String url) async {
+    try {
+      await dest.parent.create(recursive: true);
+      final tmp = File('${dest.path}.part');
+      if (await tmp.exists()) await tmp.delete();
+      await _dio.download(url, tmp.path);
+      if (await dest.exists()) await dest.delete();
+      await tmp.rename(dest.path);
+      return dest;
+    } catch (e) {
+      LogService.instance.error('Download failed: $url -> ${dest.path}, error: $e', 'MediaCacheManager');
+      return null;
+    } finally {
+      // 清理（若存在）
+      final tmp = File('${dest.path}.part');
+      if (await tmp.exists()) {
+        try { await tmp.delete(); } catch (_) {}
+      }
+      // 下载后尝试清理容量
+      unawaited(_cleanupIfNeeded());
+    }
+  }
+
+  Future<void> _touch(File f) async {
+    try { await f.setLastModified(DateTime.now()); } catch (_) {}
+  }
+
+  // 对外：仅检查是否已有本地缩略图
+  Future<File?> getLocalThumbnail(AlistFile file) async {
+    await initializeIfNeeded();
+    final rel = _alistRelativePath(file);
+    final f = _fileFor(CacheType.thumbnail, rel);
+    if (await f.exists()) { await _touch(f); return f; }
+    return null;
+  }
+
+  Future<File?> getLocalOriginal(AlistFile file) async {
+    await initializeIfNeeded();
+    final rel = _alistRelativePath(file);
+    final f = _fileFor(CacheType.original, rel);
+    if (await f.exists()) { await _touch(f); return f; }
+    return null;
+  }
+
+  Future<void> initializeIfNeeded() async {
+    if (_baseCacheDir == null) {
+      await initialize();
+    }
+  }
+
+  // 获取或下载缩略图
+  Future<File?> getOrFetchThumbnail(AlistApiClient api, AlistFile file) async {
+    await initializeIfNeeded();
+    final existing = await getLocalThumbnail(file);
+    if (existing != null) return existing;
+    final url = api.getThumbnailUrl(file);
+    if (url == null) return null;
+    final rel = _alistRelativePath(file);
+    final dest = _fileFor(CacheType.thumbnail, rel);
+    return await _downloadTo(dest, url);
+  }
+
+  // 获取或下载原图
+  Future<File?> getOrFetchOriginal(AlistApiClient api, AlistFile file) async {
+    await initializeIfNeeded();
+    final existing = await getLocalOriginal(file);
+    if (existing != null) return existing;
+    final url = await api.getDownloadUrl(file);
+    final rel = _alistRelativePath(file);
+    final dest = _fileFor(CacheType.original, rel);
+    return await _downloadTo(dest, url);
+  }
+
+  // 批量预加载指定目录下文件的缩略图
+  Future<void> preloadThumbnails(AlistApiClient api, List<AlistFile> files, {int maxConcurrent = 4}) async {
+    await initializeIfNeeded();
+    final queue = <Future>[];
+    for (final f in files) {
+      if (f.isDir) continue;
+      final url = api.getThumbnailUrl(f);
+      if (url == null) continue;
+      final rel = _alistRelativePath(f);
+      final dest = _fileFor(CacheType.thumbnail, rel);
+      if (await dest.exists()) continue;
+
+      // 控制并发：达上限则等待任一完成，完成后在回调中剔除
+      if (queue.length >= maxConcurrent) {
+        await Future.any(queue);
+      }
+      final fut = _downloadTo(dest, url);
+      queue.add(fut);
+      fut.whenComplete(() {
+        queue.remove(fut);
+      });
+      // 轻微错峰
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+    await Future.wait(queue);
+  }
+
+  // 统计与清理
+  Future<int> _dirSize(Directory dir) async {
+    int total = 0;
+    if (!await dir.exists()) return 0;
+    try {
+      await for (final ent in dir.list(recursive: true, followLinks: false)) {
+        if (ent is File) {
+          final stat = await ent.stat();
+          total += stat.size;
         }
       }
-      
-      // 预加载相关文件的缩略图（低优先级）
-      for (int i = 0; i < relatedUrls.length && i < 10; i++) {
-        final relatedUrl = relatedUrls[i];
-        final thumbUrl = _generateThumbnailUrl(relatedUrl);
-        if (thumbUrl != null) {
-          preloadFile(thumbUrl, priority: CachePriority.low);
-        }
-        
-        // 添加延迟以避免网络拥塞
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
-      
-      LogService.instance.debug('Smart preload completed for ${relatedUrls.length} related files', 'MediaCacheManager');
     } catch (e) {
-      LogService.instance.error('Smart preload failed: $e', 'MediaCacheManager');
+      LogService.instance.warning('dirSize failed: $e', 'MediaCacheManager');
     }
+    return total;
   }
-  
-  /// 生成缩略图URL（如果可能）
-  String? _generateThumbnailUrl(String originalUrl) {
-    try {
-      final uri = Uri.parse(originalUrl);
-      // 这里应该根据 Alist API 的规则生成缩略图URL
-      // 临时实现，实际应该根据 Alist 的 API 文档调整
-      if (uri.path.contains('/api/fs/get/')) {
-        return originalUrl.replaceFirst('/api/fs/get/', '/api/fs/thumb/');
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
-  
-  /// 预加载文件到缓存
-  Future<void> preloadFile(String url, {String? cacheKey, CachePriority priority = CachePriority.normal}) async {
-    try {
-      final cacheManager = getCacheManagerForUrl(url);
-      
-      // 检查是否已经缓存
-      final isCached = await this.isCached(url, cacheKey: cacheKey);
-      if (isCached) {
-        LogService.instance.debug('File already cached: $url', 'MediaCacheManager');
-        return;
-      }
-      
-      // 根据优先级决定是否立即下载
-      if (priority == CachePriority.high) {
-        await cacheManager.downloadFile(url, key: cacheKey);
-        LogService.instance.debug('High priority preload completed: $url', 'MediaCacheManager');
-      } else {
-        // 低优先级异步下载
-        cacheManager.downloadFile(url, key: cacheKey).catchError((e) {
-          LogService.instance.warning('Background preload failed: $url, error: $e', 'MediaCacheManager');
-          throw e; // 重新抛出错误而不是返回 null
-        });
-        LogService.instance.debug('Background preload started: $url', 'MediaCacheManager');
-      }
-    } catch (e) {
-      LogService.instance.warning('Failed to preload file: $url, error: $e', 'MediaCacheManager');
-    }
-  }
-  
-  /// 批量预加载文件
-  Future<void> preloadFiles(List<String> urls) async {
-    for (final url in urls) {
-      // 添加小延迟避免同时下载太多文件
-      await Future.delayed(const Duration(milliseconds: 100));
-      preloadFile(url);
-    }
-  }
-  
-  /// 检查文件是否已缓存
-  Future<bool> isCached(String url, {String? cacheKey}) async {
-    try {
-      final cacheManager = getCacheManagerForUrl(url);
-      final fileInfo = await cacheManager.getFileFromCache(cacheKey ?? url);
-      return fileInfo != null && fileInfo.file.existsSync();
-    } catch (e) {
-      return false;
-    }
-  }
-  
-  /// 获取缓存文件
-  Future<File?> getCachedFile(String url, {String? cacheKey}) async {
-    try {
-      final cacheManager = getCacheManagerForUrl(url);
-      final fileInfo = await cacheManager.getFileFromCache(cacheKey ?? url);
-      return fileInfo?.file;
-    } catch (e) {
-      LogService.instance.warning('Failed to get cached file: $url, error: $e', 'MediaCacheManager');
-      return null;
-    }
-  }
-  
-  /// 获取缓存统计信息
+
   Future<CacheStats> getCacheStats() async {
-    try {
-      final thumbnailStats = await _getCacheManagerStats(_thumbnailCache, 'thumbnail');
-      final originalStats = await _getCacheManagerStats(_originalCache, 'original');
-      final videoStats = await _getCacheManagerStats(_videoCache, 'video');
-      
-      return CacheStats(
-        thumbnailCount: thumbnailStats['count'] ?? 0,
-        thumbnailSize: thumbnailStats['size'] ?? 0,
-        originalCount: originalStats['count'] ?? 0,
-        originalSize: originalStats['size'] ?? 0,
-        videoCount: videoStats['count'] ?? 0,
-        videoSize: videoStats['size'] ?? 0,
-      );
-    } catch (e) {
-      LogService.instance.error('Failed to get cache stats: $e', 'MediaCacheManager');
-      return CacheStats(
-        thumbnailCount: 0,
-        thumbnailSize: 0,
-        originalCount: 0,
-        originalSize: 0,
-        videoCount: 0,
-        videoSize: 0,
-      );
-    }
+    await initializeIfNeeded();
+    final thumbDir = Directory(p.join(_baseCacheDir!.path, _thumbnailDir));
+    final origDir = Directory(p.join(_baseCacheDir!.path, _originalDir));
+    final videoDir = Directory(p.join(_baseCacheDir!.path, _videoDir));
+
+    // 仅统计大小；数量统计代价较高，简单遍历
+    int tSize = await _dirSize(thumbDir);
+    int oSize = await _dirSize(origDir);
+    int vSize = await _dirSize(videoDir);
+    return CacheStats(
+      thumbnailCount: await _countFiles(thumbDir),
+      thumbnailSize: tSize,
+      originalCount: await _countFiles(origDir),
+      originalSize: oSize,
+      videoCount: await _countFiles(videoDir),
+      videoSize: vSize,
+    );
   }
-  
-  Future<Map<String, int>> _getCacheManagerStats(CacheManager cacheManager, String type) async {
-    try {
-      // 简化实现 - 只返回估算值
-      return {'count': 0, 'size': 0};
-    } catch (e) {
-      LogService.instance.warning('Failed to get cache manager stats for $type: $e', 'MediaCacheManager');
-      return {'count': 0, 'size': 0};
+
+  Future<int> _countFiles(Directory dir) async {
+    if (!await dir.exists()) return 0;
+    int c = 0;
+    await for (final ent in dir.list(recursive: true, followLinks: false)) {
+      if (ent is File) c++;
     }
+    return c;
   }
-  
-  /// 清理指定类型的缓存
+
   Future<void> clearCache(CacheType type) async {
-    try {
-      switch (type) {
-        case CacheType.thumbnail:
-          await _thumbnailCache.emptyCache();
-          LogService.instance.info('Thumbnail cache cleared', 'MediaCacheManager');
-          break;
-        case CacheType.original:
-          await _originalCache.emptyCache();
-          LogService.instance.info('Original image cache cleared', 'MediaCacheManager');
-          break;
-        case CacheType.video:
-          await _videoCache.emptyCache();
-          LogService.instance.info('Video cache cleared', 'MediaCacheManager');
-          break;
-        case CacheType.all:
-          await _thumbnailCache.emptyCache();
-          await _originalCache.emptyCache();
-          await _videoCache.emptyCache();
-          _accessLog.clear();
-          await _saveAccessLog();
-          LogService.instance.info('All caches cleared', 'MediaCacheManager');
-          break;
-      }
-    } catch (e) {
-      LogService.instance.error('Failed to clear cache: $e', 'MediaCacheManager');
+    await initializeIfNeeded();
+    Future<void> clearDir(Directory d) async {
+      if (!await d.exists()) return;
+      try { await d.delete(recursive: true); } catch (_) {}
+      try { await d.create(recursive: true); } catch (_) {}
     }
-  }
-  
-  /// 智能清理缓存 - 基于访问频率和时间
-  Future<void> smartCleanup({double targetFreeSpaceRatio = 0.3}) async {
-    try {
-      LogService.instance.info('Starting smart cache cleanup', 'MediaCacheManager');
-      
-      // 获取当前缓存统计
-      final stats = await getCacheStats();
-      final totalSize = stats.totalSize;
-      
-      if (totalSize == 0) return;
-      
-      // 按照访问时间排序，删除最久未访问的文件
-      final sortedAccess = _accessLog.values.toList()
-        ..sort((a, b) => a.lastAccessed.compareTo(b.lastAccessed));
-      
-      int cleanedSize = 0;
-      final targetCleanSize = (totalSize * targetFreeSpaceRatio).round();
-      
-      for (final accessInfo in sortedAccess) {
-        if (cleanedSize >= targetCleanSize) break;
-        
-        try {
-          final cacheManager = _getCacheManagerForType(accessInfo.type);
-          await cacheManager.removeFile(accessInfo.url);
-          _accessLog.remove(accessInfo.url);
-          cleanedSize += 1024 * 1024; // 估算大小
-        } catch (e) {
-          // 忽略单个文件清理失败
-        }
-      }
-      
-      await _saveAccessLog();
-      LogService.instance.info('Smart cleanup completed, estimated cleaned size: $cleanedSize bytes', 'MediaCacheManager');
-    } catch (e) {
-      LogService.instance.error('Smart cleanup failed: $e', 'MediaCacheManager');
-    }
-  }
-  
-  CacheManager _getCacheManagerForType(CacheType type) {
+
     switch (type) {
       case CacheType.thumbnail:
-        return _thumbnailCache;
+        await clearDir(Directory(p.join(_baseCacheDir!.path, _thumbnailDir)));
+        break;
       case CacheType.original:
-        return _originalCache;
+        await clearDir(Directory(p.join(_baseCacheDir!.path, _originalDir)));
+        break;
       case CacheType.video:
-        return _videoCache;
+        await clearDir(Directory(p.join(_baseCacheDir!.path, _videoDir)));
+        break;
       case CacheType.all:
-        return _originalCache; // 默认
+        await clearDir(Directory(p.join(_baseCacheDir!.path, _thumbnailDir)));
+        await clearDir(Directory(p.join(_baseCacheDir!.path, _originalDir)));
+        await clearDir(Directory(p.join(_baseCacheDir!.path, _videoDir)));
+        break;
+    }
+    LogService.instance.info('Cache cleared for $type', 'MediaCacheManager');
+  }
+
+  Future<void> _cleanupIfNeeded() async {
+    try {
+      await initializeIfNeeded();
+      final base = _baseCacheDir!;
+      final currentSize = await _dirSize(base);
+      if (currentSize <= _maxCacheBytes) return;
+
+      // 收集所有文件，按最后修改时间从旧到新清理
+      final files = <File>[];
+      await for (final ent in base.list(recursive: true, followLinks: false)) {
+        if (ent is File && !ent.path.endsWith('.part')) files.add(ent);
+      }
+
+      // 因为 lastModified 是异步，先同步获取时间戳后再排序
+      final fileWithTime = <MapEntry<File, DateTime>>[];
+      for (final f in files) {
+        try {
+          final stat = await f.stat();
+          fileWithTime.add(MapEntry(f, stat.modified));
+        } catch (_) {}
+      }
+      fileWithTime.sort((a, b) => a.value.compareTo(b.value));
+
+      int freed = 0;
+      for (final entry in fileWithTime) {
+        if (currentSize - freed <= _maxCacheBytes) break;
+        try {
+          final stat = await entry.key.stat();
+          await entry.key.delete();
+          freed += stat.size;
+        } catch (_) {}
+      }
+
+  LogService.instance.info('Cleanup freed ~$freed bytes (target max: $_maxCacheBytes)', 'MediaCacheManager');
+    } catch (e) {
+      LogService.instance.warning('Cleanup failed: $e', 'MediaCacheManager');
     }
   }
-  
-  /// 获取最常访问的文件
-  List<CacheAccessInfo> getMostAccessedFiles({int limit = 20}) {
-    final sortedByAccess = _accessLog.values.toList()
-      ..sort((a, b) => b.accessCount.compareTo(a.accessCount));
-    
-    return sortedByAccess.take(limit).toList();
-  }
-  
-  /// 获取最近访问的文件
-  List<CacheAccessInfo> getRecentlyAccessedFiles({int limit = 20}) {
-    final sortedByTime = _accessLog.values.toList()
-      ..sort((a, b) => b.lastAccessed.compareTo(a.lastAccessed));
-    
-    return sortedByTime.take(limit).toList();
-  }
+
+  // 无额外比较函数（已用同步时间戳排序）
 }
 
 class CacheStats {
@@ -393,7 +380,7 @@ class CacheStats {
   final int originalSize;
   final int videoCount;
   final int videoSize;
-  
+
   CacheStats({
     required this.thumbnailCount,
     required this.thumbnailSize,
@@ -402,17 +389,17 @@ class CacheStats {
     required this.videoCount,
     required this.videoSize,
   });
-  
+
   int get totalCount => thumbnailCount + originalCount + videoCount;
   int get totalSize => thumbnailSize + originalSize + videoSize;
-  
+
   String get formattedTotalSize {
     if (totalSize < 1024) return '${totalSize}B';
     if (totalSize < 1024 * 1024) return '${(totalSize / 1024).toStringAsFixed(1)}KB';
     if (totalSize < 1024 * 1024 * 1024) return '${(totalSize / (1024 * 1024)).toStringAsFixed(1)}MB';
     return '${(totalSize / (1024 * 1024 * 1024)).toStringAsFixed(1)}GB';
   }
-  
+
   String formatSize(int sizeInBytes) {
     if (sizeInBytes < 1024) return '${sizeInBytes}B';
     if (sizeInBytes < 1024 * 1024) return '${(sizeInBytes / 1024).toStringAsFixed(1)}KB';
@@ -421,38 +408,4 @@ class CacheStats {
   }
 }
 
-class CacheAccessInfo {
-  final String url;
-  final CacheType type;
-  final DateTime lastAccessed;
-  final int accessCount;
-  
-  CacheAccessInfo({
-    required this.url,
-    required this.type,
-    required this.lastAccessed,
-    required this.accessCount,
-  });
-  
-  Map<String, dynamic> toMap() {
-    return {
-      'url': url,
-      'type': type.index,
-      'lastAccessed': lastAccessed.millisecondsSinceEpoch,
-      'accessCount': accessCount,
-    };
-  }
-  
-  factory CacheAccessInfo.fromMap(Map<String, dynamic> map) {
-    return CacheAccessInfo(
-      url: map['url'] ?? '',
-      type: CacheType.values[map['type'] ?? 0],
-      lastAccessed: DateTime.fromMillisecondsSinceEpoch(map['lastAccessed'] ?? 0),
-      accessCount: map['accessCount'] ?? 0,
-    );
-  }
-}
-
 enum CacheType { thumbnail, original, video, all }
-
-enum CachePriority { low, normal, high }

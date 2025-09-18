@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:io';
 import '../services/alist_api_client.dart';
 import '../services/media_cache_manager.dart';
 import '../services/file_download_service.dart';
@@ -75,15 +75,7 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
     }
   }
   
-  Future<String> _getImageUrl(AlistFile file) async {
-    // 优先使用原始URL，如果没有则通过API获取完整的下载URL
-    if (file.rawUrl?.isNotEmpty == true) {
-      return widget.apiClient.getFullUrl(file.rawUrl!);
-    } else {
-      // 使用异步方法获取带sign的正确URL
-      return await widget.apiClient.getDownloadUrl(file);
-    }
-  }
+  // 不再返回网络URL，交由缓存管理器获取/下载本地文件
   
   @override
   Widget build(BuildContext context) {
@@ -91,7 +83,7 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
       backgroundColor: Colors.black,
       appBar: _showAppBar
           ? AppBar(
-              backgroundColor: Colors.black.withOpacity(0.7),
+              backgroundColor: Colors.black.withValues(alpha: 0.7),
               foregroundColor: Colors.white,
               title: Text(
                 '${_currentIndex + 1} / ${widget.files.length}',
@@ -116,7 +108,7 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
               final file = widget.files[index];
               
               return PhotoViewGalleryPageOptions.customChild(
-                child: _AsyncImage(file: file, getImageUrl: _getImageUrl),
+                child: _LocalCachedImage(apiClient: widget.apiClient, file: file),
                 initialScale: PhotoViewComputedScale.contained,
                 minScale: PhotoViewComputedScale.contained * 0.5,
                 maxScale: PhotoViewComputedScale.covered * 3.0,
@@ -176,7 +168,7 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withOpacity(0.7),
+                      Colors.black.withValues(alpha: 0.7),
                     ],
                   ),
                 ),
@@ -262,44 +254,41 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
   }
 }
 
-class _AsyncImage extends StatefulWidget {
+class _LocalCachedImage extends StatefulWidget {
+  final AlistApiClient apiClient;
   final AlistFile file;
-  final Future<String> Function(AlistFile) getImageUrl;
-
-  const _AsyncImage({
-    required this.file,
-    required this.getImageUrl,
-  });
+  const _LocalCachedImage({required this.apiClient, required this.file});
 
   @override
-  State<_AsyncImage> createState() => _AsyncImageState();
+  State<_LocalCachedImage> createState() => _LocalCachedImageState();
 }
 
-class _AsyncImageState extends State<_AsyncImage> {
-  String? _imageUrl;
-  bool _isLoading = true;
+class _LocalCachedImageState extends State<_LocalCachedImage> {
+  File? _localFile;
+  bool _loading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadImageUrl();
+    _load();
   }
 
-  Future<void> _loadImageUrl() async {
+  Future<void> _load() async {
     try {
-      final url = await widget.getImageUrl(widget.file);
+      // 先查本地 original，否则下载
+      final f = await MediaCacheManager.instance.getOrFetchOriginal(widget.apiClient, widget.file);
       if (mounted) {
         setState(() {
-          _imageUrl = url;
-          _isLoading = false;
+          _localFile = f;
+          _loading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _error = e.toString();
-          _isLoading = false;
+          _loading = false;
         });
       }
     }
@@ -307,106 +296,32 @@ class _AsyncImageState extends State<_AsyncImage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    if (_loading) {
       return Container(
         color: Colors.black,
         child: const Center(
-          child: CircularProgressIndicator(
-            color: Colors.white,
-          ),
+          child: CircularProgressIndicator(color: Colors.white),
         ),
       );
     }
-
     if (_error != null) {
       return Container(
         color: Colors.black,
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.broken_image,
-                size: 64,
-                color: Colors.white54,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '加载失败',
-                style: const TextStyle(color: Colors.white54),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                widget.file.name,
-                style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+            children: const [
+              Icon(Icons.broken_image, size: 64, color: Colors.white54),
+              SizedBox(height: 16),
+              Text('加载失败', style: TextStyle(color: Colors.white54)),
             ],
           ),
         ),
       );
     }
-
-    if (_imageUrl != null) {
-      return CachedNetworkImage(
-        imageUrl: _imageUrl!,
-        fit: BoxFit.contain,
-        cacheManager: MediaCacheManager.instance.originalCache,
-        placeholder: (context, url) => Container(
-          color: Colors.black,
-          child: const Center(
-            child: CircularProgressIndicator(
-              color: Colors.white,
-            ),
-          ),
-        ),
-        errorWidget: (context, url, error) => Container(
-          color: Colors.black,
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.broken_image,
-                  size: 64,
-                  color: Colors.white54,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '图片加载失败',
-                  style: const TextStyle(color: Colors.white54),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.file.name,
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 12,
-                  ),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+    if (_localFile != null && _localFile!.existsSync()) {
+      return Image.file(_localFile!, fit: BoxFit.contain);
     }
-
-    return Container(
-      color: Colors.black,
-      child: const Center(
-        child: Text(
-          '无法加载图片',
-          style: TextStyle(color: Colors.white54),
-        ),
-      ),
-    );
+    return Container(color: Colors.black);
   }
 }

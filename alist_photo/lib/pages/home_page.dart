@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:io';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/alist_api_client.dart';
 import '../services/log_service.dart';
@@ -66,7 +66,7 @@ class _HomePageState extends State<HomePage> {
     });
     
     try {
-      final files = await widget.apiClient.getFileList(_currentPath);
+  final files = await widget.apiClient.getFileList(_currentPath);
       if (files != null) {
         LogService.instance.info('Successfully loaded ${files.length} files', 'HomePage', {
           'path': _currentPath,
@@ -75,6 +75,12 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _files = files;
         });
+        // 预加载当前目录的缩略图到本地缓存
+        try {
+          await MediaCacheManager.instance.preloadThumbnails(widget.apiClient, files);
+        } catch (e) {
+          LogService.instance.warning('Preload thumbnails failed: $e', 'HomePage');
+        }
       } else {
         LogService.instance.error('Failed to load files from path: $_currentPath', 'HomePage');
         if (mounted) {
@@ -817,7 +823,6 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     } else if (MediaType.isMediaFile(file.name)) {
-      final thumbnailUrl = widget.apiClient.getThumbnailUrl(file);
       final mediaType = MediaType.getMediaType(file.name);
       
       return GestureDetector(
@@ -834,61 +839,41 @@ class _HomePageState extends State<HomePage> {
           clipBehavior: Clip.antiAlias,
           child: Stack(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: thumbnailUrl != null
-                        ? CachedNetworkImage(
-                            imageUrl: thumbnailUrl,
-                            fit: BoxFit.cover,
-                            cacheManager: MediaCacheManager.instance.thumbnailCache,
-                            placeholder: (context, url) => Container(
-                              color: Colors.grey.shade200,
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            ),
-                            errorWidget: (context, url, error) => Container(
-                              color: Colors.grey.shade200,
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    mediaType == 'video' ? Icons.video_file : Icons.image,
-                                    size: 48,
-                                    color: Colors.grey,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    mediaType == 'video' ? '视频' : '无缩略图',
-                                    style: TextStyle(color: Colors.grey.shade600),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )
-                        : Container(
-                            color: Colors.grey.shade200,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  mediaType == 'video' ? Icons.video_file : Icons.image,
-                                  size: 48,
-                                  color: Colors.grey,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  mediaType == 'video' ? '视频' : '无缩略图',
-                                  style: TextStyle(color: Colors.grey.shade600),
-                                ),
-                              ],
-                            ),
+              AspectRatio(
+                aspectRatio: 1,
+                child: FutureBuilder<File?>(
+                  future: MediaCacheManager.instance.getOrFetchThumbnail(widget.apiClient, file),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Container(
+                        color: Colors.grey.shade200,
+                        child: const Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    final f = snapshot.data;
+                    if (f != null && f.existsSync()) {
+                      return Image.file(f, fit: BoxFit.cover);
+                    }
+                    return Container(
+                      color: Colors.grey.shade200,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            mediaType == 'video' ? Icons.video_file : Icons.image,
+                            size: 48,
+                            color: Colors.grey,
                           ),
-                  ),
-                  // 移除缩略图的文件名和大小显示，提高信息密度
-                ],
+                          const SizedBox(height: 8),
+                          Text(
+                            mediaType == 'video' ? '视频' : '无缩略图',
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
               
               // 选择状态覆盖层
@@ -896,9 +881,9 @@ class _HomePageState extends State<HomePage> {
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
-                      color: _selectedFiles.contains(file.name)
-                          ? Colors.green.withOpacity(0.3)
-                          : Colors.black.withOpacity(0.1),
+            color: _selectedFiles.contains(file.name)
+              ? Colors.green.withValues(alpha: 0.3)
+              : Colors.black.withValues(alpha: 0.1),
                       border: _selectedFiles.contains(file.name)
                           ? Border.all(color: Colors.green, width: 3)
                           : null,

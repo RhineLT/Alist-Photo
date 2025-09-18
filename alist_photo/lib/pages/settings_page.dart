@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import '../services/media_cache_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/alist_api_client.dart';
 import '../services/log_service.dart';
@@ -49,14 +48,10 @@ class _SettingsPageState extends State<SettingsPage> {
   
   Future<void> _calculateCacheUsage() async {
     try {
-      // 这里应该计算实际的缓存使用情况
-      // 由于CachedNetworkImage没有直接的API来获取缓存大小
-      // 我们显示一个估算值
+      final stats = await MediaCacheManager.instance.getCacheStats();
       setState(() {
-        _cacheUsage = '约 ${(_cacheSize * 0.3).toStringAsFixed(1)} GB / ${_cacheSize.toStringAsFixed(1)} GB';
+        _cacheUsage = '${stats.formattedTotalSize} 已用';
       });
-      
-      LogService.instance.debug('Cache usage calculated', 'SettingsPage');
     } catch (e) {
       LogService.instance.error('Failed to calculate cache usage: $e', 'SettingsPage');
       setState(() {
@@ -195,19 +190,14 @@ class _SettingsPageState extends State<SettingsPage> {
     
     if (confirm == true && mounted) {
       try {
-        // 清除CachedNetworkImage缓存
-        await CachedNetworkImage.evictFromCache('');
-        await DefaultCacheManager().emptyCache();
-        
-        LogService.instance.info('Image cache cleared successfully', 'SettingsPage');
-        
+        await MediaCacheManager.instance.clearCache(CacheType.all);
+        LogService.instance.info('Cache cleared successfully', 'SettingsPage');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('缓存清除成功'),
             backgroundColor: Colors.green,
           ),
         );
-        
         _calculateCacheUsage();
       } catch (e) {
         LogService.instance.error('Failed to clear cache: $e', 'SettingsPage');

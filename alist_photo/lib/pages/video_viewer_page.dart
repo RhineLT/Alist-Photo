@@ -111,7 +111,7 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
       backgroundColor: Colors.black,
       appBar: _showAppBar
           ? AppBar(
-              backgroundColor: Colors.black.withOpacity(0.7),
+              backgroundColor: Colors.black.withValues(alpha: 0.7),
               foregroundColor: Colors.white,
               title: Text(
                 '${_currentIndex + 1} / ${widget.files.length}',
@@ -162,7 +162,7 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
                   end: Alignment.bottomCenter,
                   colors: [
                     Colors.transparent,
-                    Colors.black.withOpacity(0.7),
+                    Colors.black.withValues(alpha: 0.7),
                   ],
                 ),
               ),
