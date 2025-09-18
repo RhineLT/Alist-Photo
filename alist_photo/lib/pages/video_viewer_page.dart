@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../services/alist_api_client.dart';
 import '../services/log_service.dart';
 import '../services/file_download_service.dart';
@@ -25,17 +27,23 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
   late PageController _pageController;
   late int _currentIndex;
   bool _showAppBar = true;
+  bool _isFullScreen = false;
   
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
+    
+    // 保持屏幕常亮
+    WakelockPlus.enable();
   }
   
   @override
   void dispose() {
     _pageController.dispose();
+    // 恢复屏幕设置
+    WakelockPlus.disable();
     super.dispose();
   }
   
@@ -43,6 +51,30 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
     setState(() {
       _showAppBar = !_showAppBar;
     });
+  }
+  
+  void _toggleFullScreen() {
+    setState(() {
+      _isFullScreen = !_isFullScreen;
+    });
+    
+    if (_isFullScreen) {
+      // 进入全屏模式
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      // 退出全屏模式
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
   }
   
   Future<void> _downloadFile() async {
@@ -89,6 +121,11 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
               elevation: 0,
               actions: [
                 IconButton(
+                  icon: Icon(_isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
+                  onPressed: _toggleFullScreen,
+                  tooltip: _isFullScreen ? '退出全屏' : '全屏播放',
+                ),
+                IconButton(
                   icon: const Icon(Icons.download),
                   onPressed: _downloadFile,
                   tooltip: '下载到本地',
@@ -111,6 +148,7 @@ class _VideoViewerPageState extends State<VideoViewerPage> {
             child: VideoPlayerWidget(
               apiClient: widget.apiClient,
               file: file,
+              key: ValueKey(file.name), // 使用 key 确保每个视频独立
             ),
           );
         },
@@ -193,6 +231,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   ChewieController? _chewieController;
   bool _isInitializing = true;
   String? _errorMessage;
+  bool _hasError = false;
   
   @override
   void initState() {
@@ -206,13 +245,32 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     _videoPlayerController?.dispose();
     super.dispose();
   }
-  
+
   Future<void> _initializeVideo() async {
     try {
-      final videoUrl = await widget.apiClient.getDownloadUrl(widget.file);
+      setState(() {
+        _isInitializing = true;
+        _hasError = false;
+        _errorMessage = null;
+      });
+
+      LogService.instance.info('Initializing video: ${widget.file.name}', 'VideoPlayer');
       
-      _videoPlayerController = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+      final videoUrl = await widget.apiClient.getDownloadUrl(widget.file);
+      LogService.instance.debug('Video URL obtained: $videoUrl', 'VideoPlayer');
+      
+      _videoPlayerController = VideoPlayerController.networkUrl(
+        Uri.parse(videoUrl),
+        httpHeaders: {
+          'User-Agent': 'Alist-Photo-Flutter-App',
+        },
+      );
+      
       await _videoPlayerController!.initialize();
+      
+      if (_videoPlayerController!.value.hasError) {
+        throw Exception('Video player initialization error');
+      }
       
       _chewieController = ChewieController(
         videoPlayerController: _videoPlayerController!,
@@ -222,95 +280,181 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         allowMuting: true,
         allowPlaybackSpeedChanging: true,
         showControlsOnInitialize: true,
+        showControls: true,
+        placeholder: Container(
+          color: Colors.black,
+          child: const Center(
+            child: Icon(
+              Icons.video_library,
+              size: 64,
+              color: Colors.white54,
+            ),
+          ),
+        ),
         materialProgressColors: ChewieProgressColors(
-          playedColor: Theme.of(context).primaryColor,
-          handleColor: Theme.of(context).primaryColor,
-          backgroundColor: Colors.grey,
-          bufferedColor: Colors.white70,
+          playedColor: Colors.blue,
+          handleColor: Colors.blue,
+          backgroundColor: Colors.grey.shade800,
+          bufferedColor: Colors.white38,
         ),
         cupertinoProgressColors: ChewieProgressColors(
-          playedColor: Theme.of(context).primaryColor,
-          handleColor: Theme.of(context).primaryColor,
-          backgroundColor: Colors.grey,
-          bufferedColor: Colors.white70,
+          playedColor: Colors.blue,
+          handleColor: Colors.blue,
+          backgroundColor: Colors.grey.shade800,
+          bufferedColor: Colors.white38,
         ),
+        errorBuilder: (context, errorMessage) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: Colors.red,
+                  size: 48,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  '视频播放出错',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  errorMessage,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _retryInitialization,
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          );
+        },
       );
+      
+      LogService.instance.info('Video initialized successfully: ${widget.file.name}', 'VideoPlayer');
       
       setState(() {
         _isInitializing = false;
       });
     } catch (e) {
-      LogService.instance.error('Failed to initialize video: $e', 'VideoPlayer');
+      LogService.instance.error('Failed to initialize video: $e', 'VideoPlayer', {
+        'file_name': widget.file.name,
+        'error': e.toString(),
+      });
+      
       setState(() {
         _isInitializing = false;
+        _hasError = true;
         _errorMessage = e.toString();
       });
     }
   }
   
-  @override
+  Future<void> _retryInitialization() async {
+    await _initializeVideo();
+  }  @override
   Widget build(BuildContext context) {
     if (_isInitializing) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 16),
-            Text(
-              '正在加载视频...',
-              style: TextStyle(color: Colors.white),
-            ),
-          ],
-        ),
-      );
-    }
-    
-    if (_errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              color: Colors.white70,
-              size: 48,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '无法播放视频',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
+      return Container(
+        color: Colors.black,
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Colors.blue),
+              SizedBox(height: 16),
+              Text(
+                '正在加载视频...',
+                style: TextStyle(color: Colors.white),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _errorMessage!,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
+            ],
+          ),
+        ),
+      );
+    }
+    
+    if (_hasError || _errorMessage != null) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: Colors.red,
+                size: 48,
               ),
-              textAlign: TextAlign.center,
-            ),
-          ],
+              const SizedBox(height: 16),
+              const Text(
+                '无法播放视频',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    _errorMessage!,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _retryInitialization,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('重试'),
+              ),
+            ],
+          ),
         ),
       );
     }
     
-    if (_chewieController != null) {
-      return Center(
-        child: AspectRatio(
-          aspectRatio: _videoPlayerController!.value.aspectRatio,
-          child: Chewie(controller: _chewieController!),
+    if (_chewieController != null && _videoPlayerController != null) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: AspectRatio(
+            aspectRatio: _videoPlayerController!.value.aspectRatio.isNaN 
+                ? 16 / 9 
+                : _videoPlayerController!.value.aspectRatio,
+            child: Chewie(controller: _chewieController!),
+          ),
         ),
       );
     }
     
-    return const Center(
-      child: Text(
-        '视频初始化中...',
-        style: TextStyle(color: Colors.white),
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: Text(
+          '视频初始化中...',
+          style: TextStyle(color: Colors.white),
+        ),
       ),
     );
   }

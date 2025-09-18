@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as path;
+import 'package:flutter/foundation.dart';
 import 'alist_api_client.dart';
 import 'log_service.dart';
 
@@ -17,6 +19,9 @@ class UploadTask {
   String? error;
   CancelToken? cancelToken;
   int retryCount;
+  DateTime createdAt;
+  DateTime? startedAt;
+  DateTime? completedAt;
   
   UploadTask({
     required this.id,
@@ -28,7 +33,7 @@ class UploadTask {
     this.progress = 0.0,
     this.error,
     this.retryCount = 0,
-  });
+  }) : createdAt = DateTime.now();
   
   String get formattedSize {
     if (fileSize < 1024) return '${fileSize}B';
@@ -36,34 +41,64 @@ class UploadTask {
     if (fileSize < 1024 * 1024 * 1024) return '${(fileSize / (1024 * 1024)).toStringAsFixed(1)}MB';
     return '${(fileSize / (1024 * 1024 * 1024)).toStringAsFixed(1)}GB';
   }
+  
+  String get statusText {
+    switch (status) {
+      case UploadStatus.pending:
+        return '等待中';
+      case UploadStatus.uploading:
+        return '上传中 ${(progress * 100).toStringAsFixed(0)}%';
+      case UploadStatus.paused:
+        return '已暂停';
+      case UploadStatus.completed:
+        return '已完成';
+      case UploadStatus.failed:
+        return '失败${retryCount > 0 ? ' (重试 $retryCount/$maxRetries)' : ''}';
+      case UploadStatus.cancelled:
+        return '已取消';
+    }
+  }
 }
 
-class FileUploadService {
+class FileUploadService extends ChangeNotifier {
   static const int maxRetries = 3;
+  static const int maxConcurrentUploads = 3;
   static const int chunkSize = 1024 * 1024; // 1MB chunks for large files
   
   final AlistApiClient _apiClient;
   final List<UploadTask> _uploadTasks = [];
-  final Map<String, Function(UploadTask)> _progressCallbacks = {};
-  final Map<String, Function(UploadTask)> _statusCallbacks = {};
+  int _activeUploads = 0;
   
   FileUploadService(this._apiClient);
   
   List<UploadTask> get uploadTasks => List.unmodifiable(_uploadTasks);
   
-  void addProgressCallback(String taskId, Function(UploadTask) callback) {
-    _progressCallbacks[taskId] = callback;
-  }
+  // 统计信息
+  int get pendingCount => _uploadTasks.where((t) => t.status == UploadStatus.pending).length;
+  int get uploadingCount => _uploadTasks.where((t) => t.status == UploadStatus.uploading).length;
+  int get completedCount => _uploadTasks.where((t) => t.status == UploadStatus.completed).length;
+  int get failedCount => _uploadTasks.where((t) => t.status == UploadStatus.failed).length;
+  int get pausedCount => _uploadTasks.where((t) => t.status == UploadStatus.paused).length;
   
-  void addStatusCallback(String taskId, Function(UploadTask) callback) {
-    _statusCallbacks[taskId] = callback;
-  }
+  bool get hasActiveUploads => _activeUploads > 0;
   
-  void removeCallbacks(String taskId) {
-    _progressCallbacks.remove(taskId);
-    _statusCallbacks.remove(taskId);
+  // 批量添加上传任务
+  List<String> addUploadTasks(List<String> filePaths, String targetPath) {
+    final taskIds = <String>[];
+    
+    for (final filePath in filePaths) {
+      try {
+        final taskId = addUploadTask(filePath: filePath, targetPath: targetPath);
+        taskIds.add(taskId);
+      } catch (e) {
+        LogService.instance.error('Failed to add upload task for $filePath: $e', 'FileUploadService');
+      }
+    }
+    
+    LogService.instance.info('Added ${taskIds.length} upload tasks', 'FileUploadService');
+    return taskIds;
   }
-  
+
   String addUploadTask({
     required String filePath,
     required String targetPath,
@@ -74,7 +109,7 @@ class FileUploadService {
     }
     
     final task = UploadTask(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: DateTime.now().millisecondsSinceEpoch.toString() + '_${_uploadTasks.length}',
       fileName: path.basename(filePath),
       filePath: filePath,
       targetPath: targetPath,
@@ -88,23 +123,40 @@ class FileUploadService {
       'target_path': targetPath,
     });
     
+    notifyListeners();
     return task.id;
   }
   
   Future<void> startUpload(String taskId) async {
-    final task = _uploadTasks.firstWhere((t) => t.id == taskId);
+    final taskIndex = _uploadTasks.indexWhere((t) => t.id == taskId);
+    if (taskIndex == -1) return;
+    
+    final task = _uploadTasks[taskIndex];
     
     if (task.status == UploadStatus.uploading) {
       LogService.instance.warning('Task already uploading: $taskId', 'FileUploadService');
       return;
     }
     
+    // 检查并发限制
+    if (_activeUploads >= maxConcurrentUploads) {
+      LogService.instance.info('Max concurrent uploads reached, queuing task: ${task.fileName}', 'FileUploadService');
+      task.status = UploadStatus.pending;
+      notifyListeners();
+      return;
+    }
+    
     task.status = UploadStatus.uploading;
+    task.startedAt = DateTime.now();
     task.cancelToken = CancelToken();
-    _notifyStatusCallback(task);
+    task.error = null;
+    _activeUploads++;
+    
+    notifyListeners();
     
     try {
       await _performUpload(task);
+      task.completedAt = DateTime.now();
     } catch (e) {
       if (!task.cancelToken!.isCancelled) {
         task.status = UploadStatus.failed;
@@ -114,19 +166,34 @@ class FileUploadService {
         // 自动重试
         if (task.retryCount < maxRetries) {
           task.retryCount++;
-          LogService.instance.info('Retrying upload (${task.retryCount}/$maxRetries): ${task.fileName}', 'FileUploadService');
-          await Future.delayed(Duration(seconds: task.retryCount * 2));
-          if (task.status != UploadStatus.cancelled) {
-            await startUpload(taskId);
-          }
-          return;
+          LogService.instance.info('Scheduling retry (${task.retryCount}/$maxRetries): ${task.fileName}', 'FileUploadService');
+          
+          // 延迟重试
+          Future.delayed(Duration(seconds: task.retryCount * 2), () {
+            if (task.status == UploadStatus.failed && task.retryCount <= maxRetries) {
+              task.status = UploadStatus.pending;
+              startUpload(taskId);
+            }
+          });
         }
       }
+    } finally {
+      _activeUploads--;
+      notifyListeners();
+      
+      // 启动下一个待上传的任务
+      _processQueue();
     }
-    
-    _notifyStatusCallback(task);
   }
   
+  void _processQueue() {
+    if (_activeUploads < maxConcurrentUploads) {
+      final nextTask = _uploadTasks.where((t) => t.status == UploadStatus.pending).take(1).toList();
+      if (nextTask.isNotEmpty) {
+        startUpload(nextTask.first.id);
+      }
+    }
+  }
   Future<void> _performUpload(UploadTask task) async {
     final file = File(task.filePath);
     final bytes = await file.readAsBytes();
@@ -138,6 +205,9 @@ class FileUploadService {
     });
     
     final dio = Dio();
+    dio.options.connectTimeout = const Duration(seconds: 30);
+    dio.options.sendTimeout = const Duration(minutes: 10);
+    dio.options.receiveTimeout = const Duration(seconds: 30);
     
     // 配置请求头
     final headers = <String, String>{
@@ -162,8 +232,10 @@ class FileUploadService {
         ),
         cancelToken: task.cancelToken,
         onSendProgress: (int sent, int total) {
-          task.progress = sent / total;
-          _notifyProgressCallback(task);
+          if (total > 0) {
+            task.progress = sent / total;
+            notifyListeners();
+          }
         },
       );
       
@@ -185,33 +257,66 @@ class FileUploadService {
   }
   
   void pauseUpload(String taskId) {
-    final task = _uploadTasks.firstWhere((t) => t.id == taskId);
+    final taskIndex = _uploadTasks.indexWhere((t) => t.id == taskId);
+    if (taskIndex == -1) return;
+    
+    final task = _uploadTasks[taskIndex];
     if (task.status == UploadStatus.uploading) {
       task.cancelToken?.cancel();
       task.status = UploadStatus.paused;
-      _notifyStatusCallback(task);
+      _activeUploads--;
+      notifyListeners();
       LogService.instance.info('Upload paused: ${task.fileName}', 'FileUploadService');
+      
+      // 处理队列中的下一个任务
+      _processQueue();
     }
   }
   
   void resumeUpload(String taskId) {
-    final task = _uploadTasks.firstWhere((t) => t.id == taskId);
+    final taskIndex = _uploadTasks.indexWhere((t) => t.id == taskId);
+    if (taskIndex == -1) return;
+    
+    final task = _uploadTasks[taskIndex];
     if (task.status == UploadStatus.paused) {
+      task.status = UploadStatus.pending;
       startUpload(taskId);
     }
   }
   
   void cancelUpload(String taskId) {
-    final task = _uploadTasks.firstWhere((t) => t.id == taskId);
+    final taskIndex = _uploadTasks.indexWhere((t) => t.id == taskId);
+    if (taskIndex == -1) return;
+    
+    final task = _uploadTasks[taskIndex];
+    if (task.status == UploadStatus.uploading) {
+      _activeUploads--;
+    }
+    
     task.cancelToken?.cancel();
     task.status = UploadStatus.cancelled;
-    _notifyStatusCallback(task);
+    notifyListeners();
     LogService.instance.info('Upload cancelled: ${task.fileName}', 'FileUploadService');
+    
+    // 处理队列中的下一个任务
+    _processQueue();
   }
   
   void removeUploadTask(String taskId) {
-    _uploadTasks.removeWhere((t) => t.id == taskId);
-    removeCallbacks(taskId);
+    final taskIndex = _uploadTasks.indexWhere((t) => t.id == taskId);
+    if (taskIndex == -1) return;
+    
+    final task = _uploadTasks[taskIndex];
+    if (task.status == UploadStatus.uploading) {
+      task.cancelToken?.cancel();
+      _activeUploads--;
+    }
+    
+    _uploadTasks.removeAt(taskIndex);
+    notifyListeners();
+    
+    // 处理队列中的下一个任务
+    _processQueue();
   }
   
   void clearCompletedTasks() {
@@ -219,6 +324,7 @@ class FileUploadService {
       t.status == UploadStatus.completed || 
       t.status == UploadStatus.cancelled
     );
+    notifyListeners();
   }
   
   Future<void> startAllUploads() async {
@@ -227,13 +333,23 @@ class FileUploadService {
       t.status == UploadStatus.paused
     ).toList();
     
+    LogService.instance.info('Starting ${pendingTasks.length} uploads', 'FileUploadService');
+    
     for (final task in pendingTasks) {
-      if (task.status != UploadStatus.cancelled) {
-        startUpload(task.id);
-        // 添加小延迟避免同时启动太多上传
-        await Future.delayed(const Duration(milliseconds: 100));
+      if (task.status == UploadStatus.paused) {
+        task.status = UploadStatus.pending;
       }
     }
+    
+    // 启动并发上传
+    for (int i = 0; i < maxConcurrentUploads && i < pendingTasks.length; i++) {
+      final task = pendingTasks[i];
+      if (task.status == UploadStatus.pending) {
+        startUpload(task.id);
+      }
+    }
+    
+    notifyListeners();
   }
   
   void pauseAllUploads() {
@@ -241,21 +357,38 @@ class FileUploadService {
       t.status == UploadStatus.uploading
     ).toList();
     
+    LogService.instance.info('Pausing ${uploadingTasks.length} uploads', 'FileUploadService');
+    
     for (final task in uploadingTasks) {
       pauseUpload(task.id);
     }
   }
   
-  void _notifyProgressCallback(UploadTask task) {
-    _progressCallbacks[task.id]?.call(task);
+  void retryFailedUploads() {
+    final failedTasks = _uploadTasks.where((t) => 
+      t.status == UploadStatus.failed
+    ).toList();
+    
+    LogService.instance.info('Retrying ${failedTasks.length} failed uploads', 'FileUploadService');
+    
+    for (final task in failedTasks) {
+      task.status = UploadStatus.pending;
+      task.error = null;
+      task.retryCount = 0;
+      task.progress = 0.0;
+    }
+    
+    startAllUploads();
   }
   
-  void _notifyStatusCallback(UploadTask task) {
-    _statusCallbacks[task.id]?.call(task);
+  // 获取总的上传进度
+  double get totalProgress {
+    if (_uploadTasks.isEmpty) return 0.0;
+    
+    final totalSize = _uploadTasks.fold<int>(0, (sum, task) => sum + task.fileSize);
+    if (totalSize == 0) return 0.0;
+    
+    final uploadedSize = _uploadTasks.fold<double>(0, (sum, task) => sum + (task.fileSize * task.progress));
+    return uploadedSize / totalSize;
   }
-  
-  int get pendingCount => _uploadTasks.where((t) => t.status == UploadStatus.pending).length;
-  int get uploadingCount => _uploadTasks.where((t) => t.status == UploadStatus.uploading).length;
-  int get completedCount => _uploadTasks.where((t) => t.status == UploadStatus.completed).length;
-  int get failedCount => _uploadTasks.where((t) => t.status == UploadStatus.failed).length;
 }
