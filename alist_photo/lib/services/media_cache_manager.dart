@@ -141,15 +141,12 @@ class MediaCacheManager {
       int count = 0;
       int totalSize = 0;
       
-      // Use FileSystem to get cache directory
-      final cacheDir = await cacheManager.getFileSystem().directory();
-      if (await cacheDir.exists()) {
-        await for (final entity in cacheDir.list()) {
-          if (entity is File) {
-            count++;
-            totalSize += await entity.length();
-          }
-        }
+      // Use the correct method to get cache files
+      final files = await cacheManager.getFilesFromCache();
+      count = files.length;
+      
+      for (final fileInfo in files) {
+        totalSize += fileInfo.file.lengthSync();
       }
       
       return {'count': count, 'size': totalSize};
@@ -209,14 +206,10 @@ class MediaCacheManager {
       final cacheManagers = [_thumbnailCache, _imageCache, _videoCache];
       
       for (final manager in cacheManagers) {
-        // Use FileSystem to get cache directory
-        final dir = await manager.getFileSystem().directory();
-        if (await dir.exists()) {
-          await for (final entity in dir.list(recursive: true)) {
-            if (entity is File) {
-              totalSize += await entity.length();
-            }
-          }
+        // Use the correct method to get cache files
+        final files = await manager.getFilesFromCache();
+        for (final fileInfo in files) {
+          totalSize += fileInfo.file.lengthSync();
         }
       }
       

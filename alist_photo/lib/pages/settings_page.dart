@@ -36,7 +36,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
   
   void _loadCurrentSettings() {
-    _serverUrlController.text = widget.apiClient.serverUrl ?? '';
+    _serverUrlController.text = widget.apiClient.serverUrl;
     _usernameController.text = widget.apiClient.username ?? '';
   }
   
