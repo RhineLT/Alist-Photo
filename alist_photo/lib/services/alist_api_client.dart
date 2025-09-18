@@ -127,6 +127,20 @@ class AlistApiClient {
     return false;
   }
   
+  // 获取授权头
+  Future<String> getAuthorizationHeader() async {
+    if (_token == null) {
+      final success = await login();
+      if (!success) {
+        throw Exception('Unable to authenticate');
+      }
+    }
+    return _token!;
+  }
+
+  // 获取服务器URL
+  String get serverUrl => _serverUrl ?? '';
+
   // 获取文件列表
   Future<List<AlistFile>?> getFileList(String path) async {
     LogService.instance.debug('Fetching file list for path: $path', 'AlistApiClient');

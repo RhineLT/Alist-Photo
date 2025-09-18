@@ -6,8 +6,13 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/alist_api_client.dart';
 import '../services/log_service.dart';
 import '../services/file_download_service.dart';
+import '../services/media_type_helper.dart';
+import '../services/media_cache_manager.dart';
 import '../pages/settings_page.dart';
 import '../pages/photo_viewer_page.dart';
+import '../pages/video_viewer_page.dart';
+import '../pages/live_photo_viewer_page.dart';
+import '../pages/upload_page.dart';
 
 class HomePage extends StatefulWidget {
   final AlistApiClient apiClient;
@@ -24,6 +29,10 @@ class _HomePageState extends State<HomePage> {
   bool _isLoading = false;
   bool _isGridView = true;
   final List<String> _pathHistory = ['/'];
+  
+  // 多选相关状态
+  bool _isSelectionMode = false;
+  final Set<String> _selectedFiles = <String>{};
   
   @override
   void initState() {
@@ -90,6 +99,23 @@ class _HomePageState extends State<HomePage> {
     }
   }
   
+  Future<void> _openUploadPage() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => UploadPage(
+          apiClient: widget.apiClient,
+          currentPath: _currentPath,
+        ),
+      ),
+    );
+    
+    // 如果有文件上传成功，刷新文件列表
+    if (result == true) {
+      _loadFiles();
+    }
+  }
+
   Future<void> _openSettings() async {
     final result = await Navigator.push(
       context,
@@ -111,9 +137,166 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _currentPath = newPath;
       _pathHistory.add(newPath);
+      _exitSelectionMode(); // 切换文件夹时退出选择模式
     });
     
     _loadFiles();
+  }
+  
+  void _enterSelectionMode() {
+    setState(() {
+      _isSelectionMode = true;
+      _selectedFiles.clear();
+    });
+  }
+  
+  void _exitSelectionMode() {
+    setState(() {
+      _isSelectionMode = false;
+      _selectedFiles.clear();
+    });
+  }
+  
+  void _toggleFileSelection(AlistFile file) {
+    setState(() {
+      if (_selectedFiles.contains(file.name)) {
+        _selectedFiles.remove(file.name);
+      } else {
+        _selectedFiles.add(file.name);
+      }
+      
+      // 如果没有选中任何文件，退出选择模式
+      if (_selectedFiles.isEmpty) {
+        _isSelectionMode = false;
+      }
+    });
+  }
+  
+  void _selectAllFiles() {
+    setState(() {
+      _selectedFiles.clear();
+      for (final file in _files) {
+        if (!file.isDir) {
+          _selectedFiles.add(file.name);
+        }
+      }
+    });
+  }
+  
+  Future<void> _batchDownload() async {
+    final selectedFiles = _files.where((f) => _selectedFiles.contains(f.name)).toList();
+    
+    if (selectedFiles.isEmpty) return;
+    
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(content: Text('开始下载 ${selectedFiles.length} 个文件')),
+    );
+    
+    int completed = 0;
+    int failed = 0;
+    
+    for (final file in selectedFiles) {
+      try {
+        final downloadUrl = await widget.apiClient.getDownloadUrl(file);
+        await FileDownloadService.downloadFile(
+          downloadUrl,
+          file.name,
+          onProgress: (progress) {
+            // 可以添加全局进度显示
+          },
+        );
+        completed++;
+      } catch (e) {
+        failed++;
+        LogService.instance.error('Batch download failed for ${file.name}: $e', 'HomePage');
+      }
+    }
+    
+    _exitSelectionMode();
+    
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('批量下载完成：成功 $completed 个，失败 $failed 个'),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+  
+  Future<void> _batchCopy() async {
+    // 这里需要一个文件夹选择器
+    _showFolderPicker(isMove: false);
+  }
+  
+  Future<void> _batchMove() async {
+    // 这里需要一个文件夹选择器
+    _showFolderPicker(isMove: true);
+  }
+  
+  void _showFolderPicker({required bool isMove}) {
+    // 简化版本：显示输入对话框让用户输入目标路径
+    showDialog(
+      context: context,
+      builder: (context) {
+        String targetPath = _currentPath;
+        return AlertDialog(
+          title: Text(isMove ? '移动到文件夹' : '复制到文件夹'),
+          content: TextField(
+            decoration: const InputDecoration(
+              labelText: '目标文件夹路径',
+              hintText: '/path/to/target',
+            ),
+            onChanged: (value) => targetPath = value,
+            controller: TextEditingController(text: targetPath),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                if (isMove) {
+                  _performBatchMove(targetPath);
+                } else {
+                  _performBatchCopy(targetPath);
+                }
+              },
+              child: Text(isMove ? '移动' : '复制'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+  
+  Future<void> _performBatchCopy(String targetPath) async {
+    final selectedFiles = _files.where((f) => _selectedFiles.contains(f.name)).toList();
+    
+    // 这里应该调用Alist API进行批量复制
+    // 由于API文档中没有看到批量复制的接口，这里先显示提示
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('复制 ${selectedFiles.length} 个文件到 $targetPath（功能开发中）'),
+      ),
+    );
+    
+    _exitSelectionMode();
+  }
+  
+  Future<void> _performBatchMove(String targetPath) async {
+    final selectedFiles = _files.where((f) => _selectedFiles.contains(f.name)).toList();
+    
+    // 这里应该调用Alist API进行批量移动
+    // 由于API文档中没有看到批量移动的接口，这里先显示提示
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('移动 ${selectedFiles.length} 个文件到 $targetPath（功能开发中）'),
+      ),
+    );
+    
+    _exitSelectionMode();
   }
   
   void _navigateUp() {
@@ -467,9 +650,28 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openMediaFile(AlistFile file, int index) {
+    final mediaType = MediaType.getMediaType(file.name);
+    
+    switch (mediaType) {
+      case 'image':
+        _openPhoto(file, index);
+        break;
+      case 'video':
+        _openVideo(file, index);
+        break;
+      case 'live_photo':
+        _openLivePhoto(file, index);
+        break;
+      default:
+        _showFileOperations(file);
+        break;
+    }
+  }
+
   void _openPhoto(AlistFile file, int index) {
     // 获取所有图片文件
-    final imageFiles = _files.where((f) => !f.isDir && f.isImage).toList();
+    final imageFiles = _files.where((f) => !f.isDir && MediaType.isImage(f.name)).toList();
     final imageIndex = imageFiles.indexOf(file);
     
     if (imageIndex >= 0) {
@@ -484,6 +686,53 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     }
+  }
+  
+  void _openVideo(AlistFile file, int index) {
+    // 获取所有视频文件
+    final videoFiles = _files.where((f) => !f.isDir && MediaType.isVideo(f.name)).toList();
+    final videoIndex = videoFiles.indexOf(file);
+    
+    if (videoIndex >= 0) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => VideoViewerPage(
+            apiClient: widget.apiClient,
+            files: videoFiles,
+            initialIndex: videoIndex,
+          ),
+        ),
+      );
+    }
+  }
+  
+  void _openLivePhoto(AlistFile file, int index) {
+    // 检查是否有对应的视频文件（小米动态照片的伴随视频）
+    AlistFile? videoFile;
+    final baseName = file.name.toLowerCase().replaceAll(RegExp(r'\.[^.]*$'), '');
+    
+    // 寻找对应的视频文件
+    for (final f in _files) {
+      if (!f.isDir && MediaType.isVideo(f.name)) {
+        final videoBaseName = f.name.toLowerCase().replaceAll(RegExp(r'\.[^.]*$'), '');
+        if (videoBaseName == baseName || videoBaseName.startsWith(baseName)) {
+          videoFile = f;
+          break;
+        }
+      }
+    }
+    
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LivePhotoViewerPage(
+          apiClient: widget.apiClient,
+          file: file,
+          videoFile: videoFile,
+        ),
+      ),
+    );
   }
   
   Widget _buildBreadcrumb() {
@@ -567,59 +816,175 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
-    } else if (file.isImage) {
+    } else if (MediaType.isMediaFile(file.name)) {
       final thumbnailUrl = widget.apiClient.getThumbnailUrl(file);
+      final mediaType = MediaType.getMediaType(file.name);
       
       return GestureDetector(
-        onTap: () => _openPhoto(file, index),
-        onLongPress: () => _showFileMenu(file),
+        onTap: () => _isSelectionMode 
+            ? _toggleFileSelection(file) 
+            : _openMediaFile(file, index),
+        onLongPress: () => _isSelectionMode 
+            ? null 
+            : () {
+                _enterSelectionMode();
+                _toggleFileSelection(file);
+              }(),
         child: Card(
           clipBehavior: Clip.antiAlias,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Stack(
             children: [
-              Expanded(
-                child: thumbnailUrl != null
-                    ? CachedNetworkImage(
-                        imageUrl: thumbnailUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(
-                          color: Colors.grey.shade200,
-                          child: const Center(
-                            child: CircularProgressIndicator(),
-                          ),
-                        ),
-                        errorWidget: (context, url, error) => Container(
-                          color: Colors.grey.shade200,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.image, size: 48, color: Colors.grey),
-                              const SizedBox(height: 8),
-                              Text(
-                                '无缩略图',
-                                style: TextStyle(color: Colors.grey.shade600),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: thumbnailUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: thumbnailUrl,
+                            fit: BoxFit.cover,
+                            cacheManager: MediaCacheManager.instance.thumbnailCache,
+                            placeholder: (context, url) => Container(
+                              color: Colors.grey.shade200,
+                              child: const Center(
+                                child: CircularProgressIndicator(),
                               ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : Container(
-                        color: Colors.grey.shade200,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.image, size: 48, color: Colors.grey),
-                            const SizedBox(height: 8),
-                            Text(
-                              '无缩略图',
-                              style: TextStyle(color: Colors.grey.shade600),
                             ),
-                          ],
+                            errorWidget: (context, url, error) => Container(
+                              color: Colors.grey.shade200,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    mediaType == 'video' ? Icons.video_file : Icons.image,
+                                    size: 48,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    mediaType == 'video' ? '视频' : '无缩略图',
+                                    style: TextStyle(color: Colors.grey.shade600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : Container(
+                            color: Colors.grey.shade200,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  mediaType == 'video' ? Icons.video_file : Icons.image,
+                                  size: 48,
+                                  color: Colors.grey,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  mediaType == 'video' ? '视频' : '无缩略图',
+                                  style: TextStyle(color: Colors.grey.shade600),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                  // 移除缩略图的文件名和大小显示，提高信息密度
+                ],
+              ),
+              
+              // 选择状态覆盖层
+              if (_isSelectionMode)
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: _selectedFiles.contains(file.name)
+                          ? Colors.green.withOpacity(0.3)
+                          : Colors.black.withOpacity(0.1),
+                      border: _selectedFiles.contains(file.name)
+                          ? Border.all(color: Colors.green, width: 3)
+                          : null,
+                    ),
+                  ),
+                ),
+              
+              // 选择状态指示器
+              if (_isSelectionMode)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      _selectedFiles.contains(file.name)
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      color: _selectedFiles.contains(file.name)
+                          ? Colors.green
+                          : Colors.grey,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              
+              // 快速下载按钮 (只在非选择模式显示)
+              if (!_isSelectionMode)
+                Positioned(
+                  bottom: 8,
+                  right: 8,
+                  child: Material(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(16),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => _downloadFile(file),
+                      child: const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: Icon(
+                          Icons.download,
+                          color: Colors.white,
+                          size: 16,
                         ),
                       ),
-              ),
-              // 移除缩略图的文件名和大小显示，提高信息密度
+                    ),
+                  ),
+                ),
+              // 媒体类型指示器
+              if (mediaType == 'video' && !_isSelectionMode)
+                const Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Icon(
+                      Icons.play_arrow,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                ),
+              if (mediaType == 'live_photo' && !_isSelectionMode)
+                const Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Icon(
+                      Icons.motion_photos_on,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -684,28 +1049,69 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Alist Photo'),
-        backgroundColor: Colors.blue,
+        title: _isSelectionMode 
+            ? Text('已选择 ${_selectedFiles.length} 个文件')
+            : const Text('Alist Photo'),
+        backgroundColor: _isSelectionMode ? Colors.green : Colors.blue,
         foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_box),
-            onPressed: _createNewFolder,
-            tooltip: '新建文件夹',
-          ),
-          IconButton(
-            icon: Icon(_isGridView ? Icons.list : Icons.grid_view),
-            onPressed: () {
-              setState(() {
-                _isGridView = !_isGridView;
-              });
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _openSettings,
-          ),
-        ],
+        leading: _isSelectionMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelectionMode,
+              )
+            : null,
+        actions: _isSelectionMode
+            ? [
+                IconButton(
+                  icon: const Icon(Icons.select_all),
+                  onPressed: _selectAllFiles,
+                  tooltip: '全选',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.download),
+                  onPressed: _selectedFiles.isNotEmpty ? _batchDownload : null,
+                  tooltip: '批量下载',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.copy),
+                  onPressed: _selectedFiles.isNotEmpty ? _batchCopy : null,
+                  tooltip: '批量复制',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.drive_file_move),
+                  onPressed: _selectedFiles.isNotEmpty ? _batchMove : null,
+                  tooltip: '批量移动',
+                ),
+              ]
+            : [
+                IconButton(
+                  icon: const Icon(Icons.checklist),
+                  onPressed: _enterSelectionMode,
+                  tooltip: '批量选择',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.upload),
+                  onPressed: _openUploadPage,
+                  tooltip: '上传文件',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add_box),
+                  onPressed: _createNewFolder,
+                  tooltip: '新建文件夹',
+                ),
+                IconButton(
+                  icon: Icon(_isGridView ? Icons.list : Icons.grid_view),
+                  onPressed: () {
+                    setState(() {
+                      _isGridView = !_isGridView;
+                    });
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.settings),
+                  onPressed: _openSettings,
+                ),
+              ],
       ),
       body: Column(
         children: [

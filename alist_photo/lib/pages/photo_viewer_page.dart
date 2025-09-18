@@ -3,6 +3,9 @@ import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/alist_api_client.dart';
+import '../services/media_cache_manager.dart';
+import '../services/file_download_service.dart';
+import '../services/log_service.dart';
 
 class PhotoViewerPage extends StatefulWidget {
   final AlistApiClient apiClient;
@@ -44,6 +47,34 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
     });
   }
   
+  Future<void> _downloadCurrentImage() async {
+    try {
+      final file = widget.files[_currentIndex];
+      final downloadUrl = await widget.apiClient.getDownloadUrl(file);
+      
+      await FileDownloadService.downloadFile(
+        downloadUrl,
+        file.name,
+        onProgress: (progress) {
+          LogService.instance.debug('Download progress: ${(progress * 100).toStringAsFixed(1)}%', 'PhotoViewer');
+        },
+      );
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${file.name} 下载完成')),
+        );
+      }
+    } catch (e) {
+      LogService.instance.error('Download failed: $e', 'PhotoViewer');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('下载失败: $e')),
+        );
+      }
+    }
+  }
+  
   Future<String> _getImageUrl(AlistFile file) async {
     // 优先使用原始URL，如果没有则通过API获取完整的下载URL
     if (file.rawUrl?.isNotEmpty == true) {
@@ -68,6 +99,13 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
               ),
               centerTitle: true,
               elevation: 0,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.download),
+                  onPressed: _downloadCurrentImage,
+                  tooltip: '下载到本地',
+                ),
+              ],
             )
           : null,
       body: Stack(
@@ -318,6 +356,7 @@ class _AsyncImageState extends State<_AsyncImage> {
       return CachedNetworkImage(
         imageUrl: _imageUrl!,
         fit: BoxFit.contain,
+        cacheManager: MediaCacheManager.instance.imageCache,
         placeholder: (context, url) => Container(
           color: Colors.black,
           child: const Center(
