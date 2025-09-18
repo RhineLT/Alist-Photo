@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'dart:io';
+import 'package:video_player/video_player.dart';
 import '../services/alist_api_client.dart';
 import '../services/media_cache_manager.dart';
 import '../services/file_download_service.dart';
+import '../services/media_type_helper.dart';
 import '../services/log_service.dart';
 
 class PhotoViewerPage extends StatefulWidget {
@@ -267,6 +269,10 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
   File? _localFile;
   bool _loading = true;
   String? _error;
+  LocalDynamicInfo? _dynamicInfo;
+  VideoPlayerController? _videoController;
+  bool _isVideoReady = false;
+  bool _isPressing = false;
 
   @override
   void initState() {
@@ -284,6 +290,22 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
           _loading = false;
         });
       }
+      if (f != null && await f.exists()) {
+        // 本地动态检测
+        final info = await MediaType.detectLocalDynamic(f);
+        LogService.instance.info('Dynamic detection result', 'PhotoViewer', {
+          'file': f.path,
+          'is_dynamic': info.isDynamic,
+          'vendor': info.vendor.name,
+          'has_sidecar': info.videoFile != null,
+          'embedded': info.isEmbeddedMotion,
+        });
+        if (mounted) {
+          setState(() {
+            _dynamicInfo = info;
+          });
+        }
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -292,6 +314,71 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
         });
       }
     }
+  }
+
+  Future<void> _startPlayIfAvailable() async {
+    final info = _dynamicInfo;
+    if (info == null || info.videoFile == null) {
+      // 无侧车视频，不播放，仅记录
+      LogService.instance.debug('Long-press ignored: no sidecar video', 'PhotoViewer', {
+        'file': _localFile?.path,
+      });
+      return;
+    }
+    // 避免重复初始化
+    if (_videoController == null) {
+      try {
+        LogService.instance.info('Initializing sidecar video for long-press', 'PhotoViewer', {
+          'video': info.videoFile!.path,
+        });
+        final c = VideoPlayerController.file(info.videoFile!);
+        await c.initialize();
+        await c.setLooping(true);
+        _videoController = c;
+        if (!mounted) return;
+        setState(() {
+          _isVideoReady = true;
+        });
+      } catch (e) {
+        LogService.instance.error('Video init failed: $e', 'PhotoViewer');
+        return;
+      }
+    }
+    try {
+      await _videoController!.seekTo(Duration.zero);
+      await _videoController!.play();
+      if (mounted) {
+        setState(() {
+          _isPressing = true;
+        });
+      }
+      LogService.instance.info('Long-press playback started', 'PhotoViewer');
+    } catch (e) {
+      LogService.instance.error('Start play failed: $e', 'PhotoViewer');
+    }
+  }
+
+  Future<void> _stopPlay() async {
+    try {
+      if (_videoController != null) {
+        await _videoController!.pause();
+        await _videoController!.seekTo(Duration.zero);
+      }
+      if (mounted) {
+        setState(() {
+          _isPressing = false;
+        });
+      }
+      LogService.instance.info('Long-press playback stopped', 'PhotoViewer');
+    } catch (e) {
+      LogService.instance.warning('Stop play warning: $e', 'PhotoViewer');
+    }
+  }
+
+  @override
+  void dispose() {
+    _videoController?.dispose();
+    super.dispose();
   }
 
   @override
@@ -320,7 +407,53 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
       );
     }
     if (_localFile != null && _localFile!.existsSync()) {
-      return Image.file(_localFile!, fit: BoxFit.contain);
+      // 默认显示静态图，支持长按播放
+      final child = Stack(
+        fit: StackFit.passthrough,
+        children: [
+          Image.file(_localFile!, fit: BoxFit.contain),
+          if (_isPressing && _isVideoReady && _videoController != null && _videoController!.value.isInitialized)
+            Center(
+              child: AspectRatio(
+                aspectRatio: _videoController!.value.aspectRatio == 0
+                    ? 1.0
+                    : _videoController!.value.aspectRatio,
+                child: VideoPlayer(_videoController!),
+              ),
+            ),
+          // LIVE 标识
+          if (_dynamicInfo?.isDynamic == true)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.motion_photos_on, color: Colors.white, size: 16),
+                    SizedBox(width: 4),
+                    Text(
+                      'LIVE',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      );
+      return GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onLongPressStart: (_) => _startPlayIfAvailable(),
+        onLongPressEnd: (_) => _stopPlay(),
+        child: child,
+      );
     }
     return Container(color: Colors.black);
   }

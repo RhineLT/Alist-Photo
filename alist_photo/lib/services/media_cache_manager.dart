@@ -213,7 +213,18 @@ class MediaCacheManager {
     await initializeIfNeeded();
     final rel = _alistRelativePath(file);
     final f = _fileFor(CacheType.thumbnail, rel);
-    if (await f.exists()) { await _touch(f); return f; }
+    if (await f.exists()) {
+      await _touch(f);
+      LogService.instance.debug('Thumbnail cache hit: ${f.path}', 'MediaCacheManager', {
+        'file': file.name,
+        'path': file.path,
+      });
+      return f;
+    }
+    LogService.instance.debug('Thumbnail cache miss', 'MediaCacheManager', {
+      'file': file.name,
+      'path': file.path,
+    });
     return null;
   }
 
@@ -221,7 +232,18 @@ class MediaCacheManager {
     await initializeIfNeeded();
     final rel = _alistRelativePath(file);
     final f = _fileFor(CacheType.original, rel);
-    if (await f.exists()) { await _touch(f); return f; }
+    if (await f.exists()) {
+      await _touch(f);
+      LogService.instance.debug('Original cache hit: ${f.path}', 'MediaCacheManager', {
+        'file': file.name,
+        'path': file.path,
+      });
+      return f;
+    }
+    LogService.instance.debug('Original cache miss', 'MediaCacheManager', {
+      'file': file.name,
+      'path': file.path,
+    });
     return null;
   }
 
@@ -240,7 +262,17 @@ class MediaCacheManager {
     if (url == null) return null;
     final rel = _alistRelativePath(file);
     final dest = _fileFor(CacheType.thumbnail, rel);
-    return await _downloadTo(dest, url);
+    LogService.instance.info('Downloading thumbnail', 'MediaCacheManager', {
+      'url': url,
+      'dest': dest.path,
+    });
+    final res = await _downloadTo(dest, url);
+    if (res != null) {
+      LogService.instance.info('Thumbnail downloaded', 'MediaCacheManager', {
+        'dest': res.path,
+      });
+    }
+    return res;
   }
 
   // 获取或下载原图
@@ -251,7 +283,17 @@ class MediaCacheManager {
     final url = await api.getDownloadUrl(file);
     final rel = _alistRelativePath(file);
     final dest = _fileFor(CacheType.original, rel);
-    return await _downloadTo(dest, url);
+    LogService.instance.info('Downloading original', 'MediaCacheManager', {
+      'url': url,
+      'dest': dest.path,
+    });
+    final res = await _downloadTo(dest, url);
+    if (res != null) {
+      LogService.instance.info('Original downloaded', 'MediaCacheManager', {
+        'dest': res.path,
+      });
+    }
+    return res;
   }
 
   // 批量预加载指定目录下文件的缩略图
