@@ -633,7 +633,6 @@ class AlistApiClient {
   }
   
   // Getter 方法
-  String? get serverUrl => _serverUrl;
   String? get username => _username;
   String? get token => _token;
 }

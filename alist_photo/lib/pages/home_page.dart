@@ -952,16 +952,16 @@ class _HomePageState extends State<HomePage> {
                 ),
               // 媒体类型指示器
               if (mediaType == 'video' && !_isSelectionMode)
-                const Positioned(
+                Positioned(
                   top: 8,
                   right: 8,
                   child: Container(
-                    padding: EdgeInsets.all(4),
+                    padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
                       color: Colors.black54,
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.play_arrow,
                       color: Colors.white,
                       size: 16,
@@ -969,16 +969,16 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               if (mediaType == 'live_photo' && !_isSelectionMode)
-                const Positioned(
+                Positioned(
                   top: 8,
                   right: 8,
                   child: Container(
-                    padding: EdgeInsets.all(4),
+                    padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
                       color: Colors.black54,
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.motion_photos_on,
                       color: Colors.white,
                       size: 16,

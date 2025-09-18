@@ -277,18 +277,18 @@ class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {
           
           // 播放控制提示
           if (widget.videoFile != null && _showAppBar && !_isPlayingVideo)
-            const Positioned(
+            Positioned(
               bottom: 100,
               left: 0,
               right: 0,
               child: Center(
                 child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: Colors.black54,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(
+                  child: const Text(
                     '长按播放Live Photo',
                     style: TextStyle(
                       color: Colors.white70,

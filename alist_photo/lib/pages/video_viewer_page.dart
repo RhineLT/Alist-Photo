@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../services/alist_api_client.dart';
 import '../services/log_service.dart';
 import '../services/file_download_service.dart';
