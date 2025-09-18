@@ -323,6 +323,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void _showFileMenu(AlistFile file) {
+
   void _renameFile(AlistFile file) {
     final controller = TextEditingController(text: file.name);
     showDialog(
