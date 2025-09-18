@@ -87,7 +87,7 @@ class _LivePhotoViewerPageState extends State<LivePhotoViewerPage> {
       
       await FileDownloadService.instance.downloadFile(
           url: downloadUrl,
-          fileName: file.name,
+          fileName: widget.file.name,
           onProgress: (received, total) {
             LogService.instance.debug('Download progress: ${((received / total) * 100).toStringAsFixed(1)}%', 'LivePhotoViewer');
           },
