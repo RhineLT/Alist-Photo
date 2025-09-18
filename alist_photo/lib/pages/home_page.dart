@@ -682,8 +682,7 @@ class _HomePageState extends State<HomePage> {
                     Text(
                       file.name,
                       style: const TextStyle(fontWeight: FontWeight.w500),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      // 移除缩略图的文件名显示限制
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -692,6 +691,7 @@ class _HomePageState extends State<HomePage> {
                         fontSize: 12,
                         color: Colors.grey.shade600,
                       ),
+                      // 移除缩略图的文件大小显示限制
                     ),
                   ],
                 ),

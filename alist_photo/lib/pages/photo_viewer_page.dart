@@ -44,12 +44,13 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
     });
   }
   
-  String _getImageUrl(AlistFile file) {
-    // 优先使用原始URL，如果没有则构建下载URL
+  Future<String> _getImageUrl(AlistFile file) async {
+    // 优先使用原始URL，如果没有则通过API获取完整的下载URL
     if (file.rawUrl?.isNotEmpty == true) {
       return widget.apiClient.getFullUrl(file.rawUrl!);
     } else {
-      return widget.apiClient.getDownloadUrlSync(file);
+      // 使用异步方法获取带sign的正确URL
+      return await widget.apiClient.getDownloadUrl(file);
     }
   }
   
@@ -75,50 +76,15 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
             scrollPhysics: const BouncingScrollPhysics(),
             builder: (BuildContext context, int index) {
               final file = widget.files[index];
-              final imageUrl = _getImageUrl(file);
               
-              return PhotoViewGalleryPageOptions(
-                imageProvider: CachedNetworkImageProvider(imageUrl),
+              return PhotoViewGalleryPageOptions.customChild(
+                child: _AsyncImage(file: file, getImageUrl: _getImageUrl),
                 initialScale: PhotoViewComputedScale.contained,
                 minScale: PhotoViewComputedScale.contained * 0.5,
                 maxScale: PhotoViewComputedScale.covered * 3.0,
                 heroAttributes: PhotoViewHeroAttributes(
                   tag: 'photo_${file.name}_$index',
                 ),
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    color: Colors.black,
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
-                            Icons.broken_image,
-                            size: 64,
-                            color: Colors.white54,
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            '加载失败',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            file.name,
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
               );
             },
             itemCount: widget.files.length,
@@ -253,6 +219,154 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _AsyncImage extends StatefulWidget {
+  final AlistFile file;
+  final Future<String> Function(AlistFile) getImageUrl;
+
+  const _AsyncImage({
+    required this.file,
+    required this.getImageUrl,
+  });
+
+  @override
+  State<_AsyncImage> createState() => _AsyncImageState();
+}
+
+class _AsyncImageState extends State<_AsyncImage> {
+  String? _imageUrl;
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadImageUrl();
+  }
+
+  Future<void> _loadImageUrl() async {
+    try {
+      final url = await widget.getImageUrl(widget.file);
+      if (mounted) {
+        setState(() {
+          _imageUrl = url;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Container(
+        color: Colors.black,
+        child: const Center(
+          child: CircularProgressIndicator(
+            color: Colors.white,
+          ),
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.broken_image,
+                size: 64,
+                color: Colors.white54,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '加载失败',
+                style: const TextStyle(color: Colors.white54),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.file.name,
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_imageUrl != null) {
+      return CachedNetworkImage(
+        imageUrl: _imageUrl!,
+        fit: BoxFit.contain,
+        placeholder: (context, url) => Container(
+          color: Colors.black,
+          child: const Center(
+            child: CircularProgressIndicator(
+              color: Colors.white,
+            ),
+          ),
+        ),
+        errorWidget: (context, url, error) => Container(
+          color: Colors.black,
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.broken_image,
+                  size: 64,
+                  color: Colors.white54,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '图片加载失败',
+                  style: const TextStyle(color: Colors.white54),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  widget.file.name,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: Text(
+          '无法加载图片',
+          style: TextStyle(color: Colors.white54),
+        ),
       ),
     );
   }
