@@ -356,7 +356,7 @@ class _AsyncImageState extends State<_AsyncImage> {
       return CachedNetworkImage(
         imageUrl: _imageUrl!,
         fit: BoxFit.contain,
-        cacheManager: MediaCacheManager.instance.originalImageCache,
+        cacheManager: MediaCacheManager.instance.originalCache,
         placeholder: (context, url) => Container(
           color: Colors.black,
           child: const Center(

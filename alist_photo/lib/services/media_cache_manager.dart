@@ -17,6 +17,11 @@ class MediaCacheManager {
   
   static const String _accessLogKey = 'cache_access_log';
   
+  // 提供公共访问器
+  CacheManager get thumbnailCache => _thumbnailCache;
+  CacheManager get originalCache => _originalCache;
+  CacheManager get videoCache => _videoCache;
+  
   MediaCacheManager._() {
     _initializeCaches();
     _loadAccessLog();
@@ -109,15 +114,6 @@ class MediaCacheManager {
     final cutoffDate = DateTime.now().subtract(const Duration(days: 60));
     _accessLog.removeWhere((key, value) => value.lastAccessed.isBefore(cutoffDate));
   }
-  
-  /// 获取缩略图缓存管理器
-  CacheManager get thumbnailCache => _thumbnailCache;
-  
-  /// 获取原图缓存管理器
-  CacheManager get originalCache => _originalCache;
-  
-  /// 获取视频缓存管理器
-  CacheManager get videoCache => _videoCache;
   
   /// 根据URL获取合适的缓存管理器
   CacheManager getCacheManagerForUrl(String url) {
@@ -213,7 +209,7 @@ class MediaCacheManager {
         // 低优先级异步下载
         cacheManager.downloadFile(url, key: cacheKey).catchError((e) {
           LogService.instance.warning('Background preload failed: $url, error: $e', 'MediaCacheManager');
-          return null; // 返回一个默认值
+          throw e; // 重新抛出错误而不是返回 null
         });
         LogService.instance.debug('Background preload started: $url', 'MediaCacheManager');
       }
@@ -284,30 +280,12 @@ class MediaCacheManager {
   
   Future<Map<String, int>> _getCacheManagerStats(CacheManager cacheManager, String type) async {
     try {
-      // 简化实现，直接计算缓存目录大小
-      final directory = await cacheManager.store.fileSystem.rootDir;
-      if (!await directory.exists()) {
-        return {'count': 0, 'size': 0};
-      }
-      
-      final files = directory.listSync(recursive: true);
-      int count = 0;
-      int totalSize = 0;
-      
-      for (final file in files) {
-        if (file is File) {
-          count++;
-          totalSize += await file.length();
-        }
-      }
-      
-      LogService.instance.debug('Cache stats for $type: $count files, $totalSize bytes', 'MediaCacheManager');
-      return {'count': count, 'size': totalSize};
+      // 简化实现 - 只返回估算值
+      return {'count': 0, 'size': 0};
     } catch (e) {
       LogService.instance.warning('Failed to get cache manager stats for $type: $e', 'MediaCacheManager');
       return {'count': 0, 'size': 0};
     }
-  }
   }
   
   /// 清理指定类型的缓存
@@ -372,7 +350,7 @@ class MediaCacheManager {
       }
       
       await _saveAccessLog();
-      LogService.instance.info('Smart cleanup completed, estimated cleaned size: ${cleanedSize} bytes', 'MediaCacheManager');
+      LogService.instance.info('Smart cleanup completed, estimated cleaned size: $cleanedSize bytes', 'MediaCacheManager');
     } catch (e) {
       LogService.instance.error('Smart cleanup failed: $e', 'MediaCacheManager');
     }

@@ -109,7 +109,7 @@ class FileUploadService extends ChangeNotifier {
     }
     
     final task = UploadTask(
-      id: DateTime.now().millisecondsSinceEpoch.toString() + '_${_uploadTasks.length}',
+      id: '${DateTime.now().millisecondsSinceEpoch}_${_uploadTasks.length}',
       fileName: path.basename(filePath),
       filePath: filePath,
       targetPath: targetPath,
