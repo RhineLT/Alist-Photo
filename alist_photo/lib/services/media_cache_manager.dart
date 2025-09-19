@@ -182,21 +182,60 @@ class MediaCacheManager {
   Future<File?> _downloadTo(File dest, String url) async {
     return _withThrottle<File?>(() async {
       try {
+        // 确保父目录存在
         await dest.parent.create(recursive: true);
+        
+        // 使用临时文件避免下载过程中的冲突
         final tmp = File('${dest.path}.part');
-        if (await tmp.exists()) await tmp.delete();
+        if (await tmp.exists()) {
+          try { await tmp.delete(); } catch (_) {}
+        }
+        
+        LogService.instance.debug('Starting download: $url -> ${dest.path}', 'MediaCacheManager');
+        
+        // 下载到临时文件
         await _dio.download(url, tmp.path);
-        if (await dest.exists()) await dest.delete();
+        
+        // 验证临时文件是否下载成功
+        if (!await tmp.exists()) {
+          throw Exception('Temporary file was not created');
+        }
+        
+        final stat = await tmp.stat();
+        if (stat.size == 0) {
+          throw Exception('Downloaded file is empty');
+        }
+        
+        LogService.instance.debug('Download completed, size: ${stat.size} bytes', 'MediaCacheManager');
+        
+        // 如果目标文件已存在，先删除
+        if (await dest.exists()) {
+          try { await dest.delete(); } catch (_) {}
+        }
+        
+        // 重命名临时文件为目标文件
         await tmp.rename(dest.path);
+        
+        // 验证最终文件存在
+        if (!await dest.exists()) {
+          throw Exception('Failed to rename temporary file to destination');
+        }
+        
+        LogService.instance.info('File cached successfully: ${dest.path}', 'MediaCacheManager');
         return dest;
       } catch (e) {
         LogService.instance.error('Download failed: $url -> ${dest.path}, error: $e', 'MediaCacheManager');
         return null;
       } finally {
-        // 清理（若存在）
+        // 清理临时文件（若存在）
         final tmp = File('${dest.path}.part');
         if (await tmp.exists()) {
-          try { await tmp.delete(); } catch (_) {}
+          try { 
+            await tmp.delete(); 
+            LogService.instance.debug('Cleaned up temporary file', 'MediaCacheManager');
+          } catch (e) {
+            LogService.instance.warning('Failed to clean up temporary file: $e', 'MediaCacheManager');
+          }
         }
         // 下载后尝试清理容量
         unawaited(_cleanupIfNeeded());
@@ -299,18 +338,48 @@ class MediaCacheManager {
   Future<File?> getOrFetchOriginal(AlistApiClient api, AlistFile file) async {
     await initializeIfNeeded();
     final existing = await getLocalOriginal(file);
-    if (existing != null) return existing;
+    if (existing != null) {
+      LogService.instance.debug('Original cache hit, returning existing file', 'MediaCacheManager', {
+        'file': file.name,
+        'cache_path': existing.path,
+      });
+      return existing;
+    }
+    
+    LogService.instance.info('Original cache miss, starting download', 'MediaCacheManager', {
+      'file': file.name,
+      'path': file.path,
+    });
+    
     final url = await api.getDownloadUrl(file);
+    if (url.isEmpty) {
+      LogService.instance.error('Failed to get download URL for original', 'MediaCacheManager', {
+        'file': file.name,
+        'path': file.path,
+      });
+      return null;
+    }
+    
     final rel = _alistRelativePath(file);
     final dest = _fileFor(CacheType.original, rel);
     LogService.instance.info('Downloading original', 'MediaCacheManager', {
+      'file': file.name,
       'url': url,
       'dest': dest.path,
+      'relative_path': rel,
     });
+    
     final res = await _downloadTo(dest, url);
     if (res != null) {
-      LogService.instance.info('Original downloaded', 'MediaCacheManager', {
+      LogService.instance.info('Original downloaded successfully', 'MediaCacheManager', {
+        'file': file.name,
         'dest': res.path,
+        'file_exists': await res.exists(),
+      });
+    } else {
+      LogService.instance.error('Original download failed', 'MediaCacheManager', {
+        'file': file.name,
+        'dest': dest.path,
       });
     }
     return res;

@@ -502,9 +502,25 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
     try {
       // 先查本地 original，否则下载
       final f = await MediaCacheManager.instance.getOrFetchOriginal(widget.apiClient, widget.file);
+      
+      // 确保文件真实存在且可读取
+      if (f != null && await f.exists()) {
+        final stat = await f.stat();
+        if (stat.size > 0) {
+          if (mounted) {
+            setState(() {
+              _localFile = f;
+              _loading = false;
+            });
+          }
+          return;
+        }
+      }
+      
+      // 如果文件不存在或为空，设置错误状态
       if (mounted) {
         setState(() {
-          _localFile = f;
+          _error = '图片文件不可用或下载失败';
           _loading = false;
         });
       }
@@ -528,25 +544,42 @@ class _LocalCachedImageState extends State<_LocalCachedImage> {
         ),
       );
     }
+    
     if (_error != null) {
       return Container(
         color: Colors.black,
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(Icons.broken_image, size: 64, color: Colors.white54),
-              SizedBox(height: 16),
-              Text('加载失败', style: TextStyle(color: Colors.white54)),
+            children: [
+              const Icon(Icons.broken_image, size: 64, color: Colors.white54),
+              const SizedBox(height: 16),
+              const Text('加载失败', style: TextStyle(color: Colors.white54)),
+              const SizedBox(height: 8),
+              Text(_error!, style: const TextStyle(color: Colors.white30, fontSize: 12)),
             ],
           ),
         ),
       );
     }
-    if (_localFile != null && _localFile!.existsSync()) {
-      // 仅显示静态图，由页面层处理长按与视频覆盖层
+    
+    if (_localFile != null) {
+      // 文件已经在 _load() 中验证过存在性和大小，直接显示
       return Image.file(_localFile!, fit: BoxFit.contain);
     }
-    return Container(color: Colors.black);
+    
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.image_not_supported, size: 64, color: Colors.white54),
+            SizedBox(height: 16),
+            Text('图片不可用', style: TextStyle(color: Colors.white54)),
+          ],
+        ),
+      ),
+    );
   }
 }

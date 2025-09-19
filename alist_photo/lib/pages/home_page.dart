@@ -34,6 +34,10 @@ class _HomePageState extends State<HomePage> {
   bool _isSelectionMode = false;
   final Set<String> _selectedFiles = <String>{};
   
+  // 退出确认相关状态
+  DateTime? _lastBackPressed;
+  static const Duration _backPressedThreshold = Duration(seconds: 2);
+  
   @override
   void initState() {
     super.initState();
@@ -318,11 +322,47 @@ class _HomePageState extends State<HomePage> {
     _exitSelectionMode();
   }
   
+  // 处理返回键逻辑
+  Future<bool> _handleBackPress() async {
+    // 如果当前在选择模式，退出选择模式
+    if (_isSelectionMode) {
+      _exitSelectionMode();
+      return false;
+    }
+    
+    // 如果不在根目录，返回上一级目录
+    if (_pathHistory.length > 1) {
+      _navigateUp();
+      return false;
+    }
+    
+    // 如果在根目录，显示退出确认
+    final now = DateTime.now();
+    if (_lastBackPressed == null || 
+        now.difference(_lastBackPressed!) > _backPressedThreshold) {
+      _lastBackPressed = now;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('再次按返回键退出应用'),
+            duration: Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return false;
+    }
+    
+    // 允许退出应用
+    return true;
+  }
+  
   void _navigateUp() {
     if (_pathHistory.length > 1) {
       _pathHistory.removeLast();
       setState(() {
         _currentPath = _pathHistory.last;
+        _exitSelectionMode(); // 切换目录时退出选择模式
       });
       _loadFiles();
     }
@@ -1045,19 +1085,30 @@ class _HomePageState extends State<HomePage> {
   
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: _isSelectionMode 
-            ? Text('已选择 ${_selectedFiles.length} 个文件')
-            : const Text('Alist Photo'),
-        backgroundColor: _isSelectionMode ? Colors.green : Colors.blue,
-        foregroundColor: Colors.white,
-        leading: _isSelectionMode
-            ? IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: _exitSelectionMode,
-              )
-            : null,
+    return PopScope(
+      canPop: false, // 始终拦截返回键
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return; // 如果已经弹出，不再处理
+        
+        final shouldPop = await _handleBackPress();
+        if (shouldPop) {
+          // 退出整个应用
+          SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: _isSelectionMode 
+              ? Text('已选择 ${_selectedFiles.length} 个文件')
+              : const Text('Alist Photo'),
+          backgroundColor: _isSelectionMode ? Colors.green : Colors.blue,
+          foregroundColor: Colors.white,
+          leading: _isSelectionMode
+              ? IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: _exitSelectionMode,
+                )
+              : null,
         actions: _isSelectionMode
             ? [
                 IconButton(
@@ -1177,6 +1228,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    ),
     );
   }
 }
