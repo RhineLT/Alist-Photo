@@ -33,6 +33,11 @@ class _HomePageState extends State<HomePage> {
   // 多选相关状态
   bool _isSelectionMode = false;
   final Set<String> _selectedFiles = <String>{};
+  // 复制/移动状态
+  String? _pendingOperation; // 'copy' or 'move'
+  List<String> _pendingNames = [];
+  String? _operationSrcDir;
+  bool _isChoosingTarget = false; // 选择目标目录模式
   
   // 退出确认相关状态
   DateTime? _lastBackPressed;
@@ -160,7 +165,9 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _currentPath = newPath;
       _pathHistory.add(newPath);
-      _exitSelectionMode(); // 切换文件夹时退出选择模式
+      if (!_isChoosingTarget) {
+        _exitSelectionMode();
+      }
     });
     
     _loadFiles();
@@ -247,80 +254,83 @@ class _HomePageState extends State<HomePage> {
   }
   
   Future<void> _batchCopy() async {
-    // 这里需要一个文件夹选择器
-    _showFolderPicker(isMove: false);
+    final names = _files.where((f) => _selectedFiles.contains(f.name)).map((f) => f.name).toList();
+    if (names.isEmpty) return;
+    setState(() {
+      _pendingOperation = 'copy';
+      _pendingNames = names;
+      _operationSrcDir = _currentPath;
+      _isChoosingTarget = true;
+      _isSelectionMode = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('请选择目标目录，然后点击右上角粘贴 (${names.length} 项)')),
+    );
   }
-  
+
   Future<void> _batchMove() async {
-    // 这里需要一个文件夹选择器
-    _showFolderPicker(isMove: true);
-  }
-  
-  void _showFolderPicker({required bool isMove}) {
-    // 简化版本：显示输入对话框让用户输入目标路径
-    showDialog(
-      context: context,
-      builder: (context) {
-        String targetPath = _currentPath;
-        return AlertDialog(
-          title: Text(isMove ? '移动到文件夹' : '复制到文件夹'),
-          content: TextField(
-            decoration: const InputDecoration(
-              labelText: '目标文件夹路径',
-              hintText: '/path/to/target',
-            ),
-            onChanged: (value) => targetPath = value,
-            controller: TextEditingController(text: targetPath),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                if (isMove) {
-                  _performBatchMove(targetPath);
-                } else {
-                  _performBatchCopy(targetPath);
-                }
-              },
-              child: Text(isMove ? '移动' : '复制'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-  
-  Future<void> _performBatchCopy(String targetPath) async {
-    final selectedFiles = _files.where((f) => _selectedFiles.contains(f.name)).toList();
-    
-    // 这里应该调用Alist API进行批量复制
-    // 由于API文档中没有看到批量复制的接口，这里先显示提示
+    final names = _files.where((f) => _selectedFiles.contains(f.name)).map((f) => f.name).toList();
+    if (names.isEmpty) return;
+    setState(() {
+      _pendingOperation = 'move';
+      _pendingNames = names;
+      _operationSrcDir = _currentPath;
+      _isChoosingTarget = true;
+      _isSelectionMode = false;
+    });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('复制 ${selectedFiles.length} 个文件到 $targetPath（功能开发中）'),
-      ),
+      SnackBar(content: Text('请选择目标目录，然后点击右上角粘贴 (${names.length} 项)')),
     );
-    
-    _exitSelectionMode();
+  }
+
+  void _cancelPendingOperation() {
+    setState(() {
+      _pendingOperation = null;
+      _pendingNames = [];
+      _operationSrcDir = null;
+      _isChoosingTarget = false;
+    });
+  }
+
+  Future<void> _executePendingOperation() async {
+    if (_pendingOperation == null || _operationSrcDir == null) return;
+    final op = _pendingOperation!;
+    final srcDir = _operationSrcDir!;
+    final dstDir = _currentPath;
+    if (srcDir == dstDir) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('目标目录不能与源目录相同')));
+      return;
+    }
+    if (op == 'move' && dstDir.startsWith(srcDir.endsWith('/') ? srcDir : '$srcDir/')) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('不能将目录移动到其自身子目录')));
+      return;
+    }
+    final names = List<String>.from(_pendingNames);
+    setState(() { _isLoading = true; });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((op=='copy'?'复制':'移动')+'中：${names.length} 项...')));
+    bool success = false;
+    if (op == 'copy') {
+      success = await widget.apiClient.copyFiles(srcDir: srcDir, dstDir: dstDir, names: names);
+    } else {
+      success = await widget.apiClient.moveFiles(srcDir: srcDir, dstDir: dstDir, names: names);
+    }
+    if (success) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((op=='copy'?'复制':'移动')+'成功')));
+      }
+      _loadFiles(refresh: true);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((op=='copy'?'复制':'移动')+'失败'), backgroundColor: Colors.red));
+      }
+    }
+    setState(() { _isLoading = false; });
+    _cancelPendingOperation();
   }
   
-  Future<void> _performBatchMove(String targetPath) async {
-    final selectedFiles = _files.where((f) => _selectedFiles.contains(f.name)).toList();
-    
-    // 这里应该调用Alist API进行批量移动
-    // 由于API文档中没有看到批量移动的接口，这里先显示提示
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('移动 ${selectedFiles.length} 个文件到 $targetPath（功能开发中）'),
-      ),
-    );
-    
-    _exitSelectionMode();
-  }
+  // 兼容旧调用（不再使用文本输入，而是进入目录选择模式）
+  Future<void> _performBatchCopy(String targetPath) async { _batchCopy(); }
+  Future<void> _performBatchMove(String targetPath) async { _batchMove(); }
   
   // 处理返回键逻辑
   Future<bool> _handleBackPress() async {
@@ -362,7 +372,9 @@ class _HomePageState extends State<HomePage> {
       _pathHistory.removeLast();
       setState(() {
         _currentPath = _pathHistory.last;
-        _exitSelectionMode(); // 切换目录时退出选择模式
+        if (!_isChoosingTarget) {
+          _exitSelectionMode();
+        }
       });
       _loadFiles();
     }
@@ -1098,70 +1110,86 @@ class _HomePageState extends State<HomePage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: _isSelectionMode 
-              ? Text('已选择 ${_selectedFiles.length} 个文件')
-              : const Text('Alist Photo'),
-          backgroundColor: _isSelectionMode ? Colors.green : Colors.blue,
+          title: _isChoosingTarget
+              ? Text('${_pendingOperation == 'copy' ? '复制' : '移动'}到: $_currentPath')
+              : _isSelectionMode
+                  ? Text('已选择 ${_selectedFiles.length} 个文件')
+                  : const Text('Alist Photo'),
+          backgroundColor: _isChoosingTarget
+              ? Colors.orange
+              : _isSelectionMode ? Colors.green : Colors.blue,
           foregroundColor: Colors.white,
-          leading: _isSelectionMode
+          leading: _isChoosingTarget
               ? IconButton(
                   icon: const Icon(Icons.close),
-                  onPressed: _exitSelectionMode,
+                  tooltip: '取消',
+                  onPressed: _cancelPendingOperation,
                 )
-              : null,
-        actions: _isSelectionMode
-            ? [
-                IconButton(
-                  icon: const Icon(Icons.select_all),
-                  onPressed: _selectAllFiles,
-                  tooltip: '全选',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.download),
-                  onPressed: _selectedFiles.isNotEmpty ? _batchDownload : null,
-                  tooltip: '批量下载',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.copy),
-                  onPressed: _selectedFiles.isNotEmpty ? _batchCopy : null,
-                  tooltip: '批量复制',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.drive_file_move),
-                  onPressed: _selectedFiles.isNotEmpty ? _batchMove : null,
-                  tooltip: '批量移动',
-                ),
-              ]
-            : [
-                IconButton(
-                  icon: const Icon(Icons.checklist),
-                  onPressed: _enterSelectionMode,
-                  tooltip: '批量选择',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.upload),
-                  onPressed: _openUploadPage,
-                  tooltip: '上传文件',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add_box),
-                  onPressed: _createNewFolder,
-                  tooltip: '新建文件夹',
-                ),
-                IconButton(
-                  icon: Icon(_isGridView ? Icons.list : Icons.grid_view),
-                  onPressed: () {
-                    setState(() {
-                      _isGridView = !_isGridView;
-                    });
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.settings),
-                  onPressed: _openSettings,
-                ),
-              ],
-      ),
+              : _isSelectionMode
+                  ? IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: _exitSelectionMode,
+                    )
+                  : null,
+          actions: _isChoosingTarget
+              ? [
+                  IconButton(
+                    icon: const Icon(Icons.paste),
+                    tooltip: '粘贴到此',
+                    onPressed: _executePendingOperation,
+                  ),
+                ]
+              : _isSelectionMode
+                  ? [
+                      IconButton(
+                        icon: const Icon(Icons.select_all),
+                        onPressed: _selectAllFiles,
+                        tooltip: '全选',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.download),
+                        onPressed: _selectedFiles.isNotEmpty ? _batchDownload : null,
+                        tooltip: '批量下载',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy),
+                        onPressed: _selectedFiles.isNotEmpty ? _batchCopy : null,
+                        tooltip: '批量复制',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.drive_file_move),
+                        onPressed: _selectedFiles.isNotEmpty ? _batchMove : null,
+                        tooltip: '批量移动',
+                      ),
+                    ]
+                  : [
+                      IconButton(
+                        icon: const Icon(Icons.checklist),
+                        onPressed: _enterSelectionMode,
+                        tooltip: '批量选择',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.upload),
+                        onPressed: _openUploadPage,
+                        tooltip: '上传文件',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add_box),
+                        onPressed: _createNewFolder,
+                        tooltip: '新建文件夹',
+                      ),
+                      IconButton(
+                        icon: Icon(_isGridView ? Icons.list : Icons.grid_view),
+                        onPressed: () {
+                          setState(() { _isGridView = !_isGridView; });
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.settings),
+                        onPressed: _openSettings,
+                      ),
+                    ],
+        ),
       body: Column(
         children: [
           if (_pathHistory.length > 1)

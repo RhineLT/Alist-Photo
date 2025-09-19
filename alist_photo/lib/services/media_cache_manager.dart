@@ -39,6 +39,9 @@ class MediaCacheManager {
   static const int _globalMaxConcurrent = 7;
   int _inflight = 0;
   final List<Completer<void>> _waiters = [];
+  
+  // 下载锁机制 - 防止同一文件的重复下载
+  final Map<String, Completer<File?>> _downloadingFiles = {};
 
   Future<T> _withThrottle<T>(Future<T> Function() action) async {
     if (_inflight >= _globalMaxConcurrent) {
@@ -312,29 +315,62 @@ class MediaCacheManager {
     }
   }
 
-  // 获取或下载缩略图
+  // 获取或下载缩略图（带下载锁防重复下载）
   Future<File?> getOrFetchThumbnail(AlistApiClient api, AlistFile file) async {
     await initializeIfNeeded();
     final existing = await getLocalThumbnail(file);
     if (existing != null) return existing;
     final url = api.getThumbnailUrl(file);
     if (url == null) return null;
+    
     final rel = _alistRelativePath(file);
     final dest = _fileFor(CacheType.thumbnail, rel);
-    LogService.instance.info('Downloading thumbnail', 'MediaCacheManager', {
-      'url': url,
-      'dest': dest.path,
-    });
-    final res = await _downloadTo(dest, url);
-    if (res != null) {
-      LogService.instance.info('Thumbnail downloaded', 'MediaCacheManager', {
-        'dest': res.path,
+    final downloadKey = dest.path; // 使用目标文件路径作为锁的键
+    
+    // 检查是否正在下载相同文件
+    if (_downloadingFiles.containsKey(downloadKey)) {
+      LogService.instance.debug('Thumbnail file already downloading, waiting for completion', 'MediaCacheManager', {
+        'file': file.name,
+        'dest': dest.path,
       });
+      return await _downloadingFiles[downloadKey]!.future;
     }
-    return res;
+    
+    // 创建下载锁
+    final completer = Completer<File?>();
+    _downloadingFiles[downloadKey] = completer;
+    
+    try {
+      LogService.instance.info('Downloading thumbnail', 'MediaCacheManager', {
+        'file': file.name,
+        'url': url,
+        'dest': dest.path,
+      });
+      
+      final res = await _downloadTo(dest, url);
+      if (res != null) {
+        LogService.instance.info('Thumbnail downloaded', 'MediaCacheManager', {
+          'file': file.name,
+          'dest': res.path,
+        });
+      }
+      
+      completer.complete(res);
+      return res;
+    } catch (e) {
+      LogService.instance.error('Exception during thumbnail download: $e', 'MediaCacheManager', {
+        'file': file.name,
+        'dest': dest.path,
+      });
+      completer.complete(null);
+      return null;
+    } finally {
+      // 移除下载锁
+      _downloadingFiles.remove(downloadKey);
+    }
   }
 
-  // 获取或下载原图
+  // 获取或下载原图（带下载锁防重复下载）
   Future<File?> getOrFetchOriginal(AlistApiClient api, AlistFile file) async {
     await initializeIfNeeded();
     final existing = await getLocalOriginal(file);
@@ -351,59 +387,122 @@ class MediaCacheManager {
       'path': file.path,
     });
     
-    final url = await api.getDownloadUrl(file);
-    if (url.isEmpty) {
-      LogService.instance.error('Failed to get download URL for original', 'MediaCacheManager', {
-        'file': file.name,
-        'path': file.path,
-      });
-      return null;
-    }
-    
     final rel = _alistRelativePath(file);
     final dest = _fileFor(CacheType.original, rel);
-    LogService.instance.info('Downloading original', 'MediaCacheManager', {
-      'file': file.name,
-      'url': url,
-      'dest': dest.path,
-      'relative_path': rel,
-    });
+    final downloadKey = dest.path; // 使用目标文件路径作为锁的键
     
-    final res = await _downloadTo(dest, url);
-    if (res != null) {
-      LogService.instance.info('Original downloaded successfully', 'MediaCacheManager', {
-        'file': file.name,
-        'dest': res.path,
-        'file_exists': await res.exists(),
-      });
-    } else {
-      LogService.instance.error('Original download failed', 'MediaCacheManager', {
+    // 检查是否正在下载相同文件
+    if (_downloadingFiles.containsKey(downloadKey)) {
+      LogService.instance.debug('File already downloading, waiting for completion', 'MediaCacheManager', {
         'file': file.name,
         'dest': dest.path,
       });
+      return await _downloadingFiles[downloadKey]!.future;
     }
-    return res;
+    
+    // 创建下载锁
+    final completer = Completer<File?>();
+    _downloadingFiles[downloadKey] = completer;
+    
+    try {
+      final url = await api.getDownloadUrl(file);
+      if (url.isEmpty) {
+        LogService.instance.error('Failed to get download URL for original', 'MediaCacheManager', {
+          'file': file.name,
+          'path': file.path,
+        });
+        completer.complete(null);
+        return null;
+      }
+      
+      LogService.instance.info('Downloading original', 'MediaCacheManager', {
+        'file': file.name,
+        'url': url,
+        'dest': dest.path,
+        'relative_path': rel,
+      });
+      
+      final res = await _downloadTo(dest, url);
+      if (res != null) {
+        LogService.instance.info('Original downloaded successfully', 'MediaCacheManager', {
+          'file': file.name,
+          'dest': res.path,
+          'file_exists': await res.exists(),
+        });
+      } else {
+        LogService.instance.error('Original download failed', 'MediaCacheManager', {
+          'file': file.name,
+          'dest': dest.path,
+        });
+      }
+      
+      completer.complete(res);
+      return res;
+    } catch (e) {
+      LogService.instance.error('Exception during original download: $e', 'MediaCacheManager', {
+        'file': file.name,
+        'dest': dest.path,
+      });
+      completer.complete(null);
+      return null;
+    } finally {
+      // 移除下载锁
+      _downloadingFiles.remove(downloadKey);
+    }
   }
 
-  // 获取或下载侧车视频到本地缓存
+  // 获取或下载侧车视频到本地缓存（带下载锁防重复下载）
   Future<File?> getOrFetchVideo(AlistApiClient api, AlistFile file) async {
     await initializeIfNeeded();
     final existing = await getLocalVideo(file);
     if (existing != null) return existing;
-    final url = await api.getDownloadUrl(file);
+    
     final rel = _alistRelativePath(file);
     final dest = _fileFor(CacheType.video, rel);
-    LogService.instance.info('Downloading sidecar video', 'MediaCacheManager', {
-      'url': url,
-      'dest': dest.path,
-    });
-    final res = await _downloadTo(dest, url);
-    if (res != null) {
-      LogService.instance.info('Sidecar video downloaded', 'MediaCacheManager', {
-        'dest': res.path,
+    final downloadKey = dest.path; // 使用目标文件路径作为锁的键
+    
+    // 检查是否正在下载相同文件
+    if (_downloadingFiles.containsKey(downloadKey)) {
+      LogService.instance.debug('Video file already downloading, waiting for completion', 'MediaCacheManager', {
+        'file': file.name,
+        'dest': dest.path,
       });
+      return await _downloadingFiles[downloadKey]!.future;
     }
-    return res;
+    
+    // 创建下载锁
+    final completer = Completer<File?>();
+    _downloadingFiles[downloadKey] = completer;
+    
+    try {
+      final url = await api.getDownloadUrl(file);
+      LogService.instance.info('Downloading sidecar video', 'MediaCacheManager', {
+        'file': file.name,
+        'url': url,
+        'dest': dest.path,
+      });
+      
+      final res = await _downloadTo(dest, url);
+      if (res != null) {
+        LogService.instance.info('Sidecar video downloaded', 'MediaCacheManager', {
+          'file': file.name,
+          'dest': res.path,
+        });
+      }
+      
+      completer.complete(res);
+      return res;
+    } catch (e) {
+      LogService.instance.error('Exception during video download: $e', 'MediaCacheManager', {
+        'file': file.name,
+        'dest': dest.path,
+      });
+      completer.complete(null);
+      return null;
+    } finally {
+      // 移除下载锁
+      _downloadingFiles.remove(downloadKey);
+    }
   }
 
   // 批量预加载指定目录下文件的缩略图

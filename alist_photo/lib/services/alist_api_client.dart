@@ -520,6 +520,116 @@ class AlistApiClient {
     return false;
   }
 
+  // 移动文件或文件夹（批量）
+  Future<bool> moveFiles({required String srcDir, required String dstDir, required List<String> names}) async {
+    LogService.instance.info('Moving files', 'AlistApiClient', {
+      'src_dir': srcDir,
+      'dst_dir': dstDir,
+      'names': names,
+    });
+
+    if (names.isEmpty) {
+      LogService.instance.warning('Move aborted: empty names list', 'AlistApiClient');
+      return false;
+    }
+
+    if (_token == null) {
+      final success = await login();
+      if (!success) {
+        LogService.instance.error('Login failed, cannot move files', 'AlistApiClient');
+        return false;
+      }
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_serverUrl/api/fs/move'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': _token!,
+        },
+        body: jsonEncode({
+          'src_dir': srcDir,
+            'dst_dir': dstDir,
+            'names': names,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['code'] == 200) {
+          LogService.instance.info('Move success', 'AlistApiClient');
+          return true;
+        } else {
+          LogService.instance.error('Move failed: code=${data['code']} msg=${data['message']}', 'AlistApiClient');
+        }
+      } else {
+        LogService.instance.error('Move HTTP error: ${response.statusCode}', 'AlistApiClient', {
+          'response': response.body,
+        });
+      }
+    } catch (e) {
+      LogService.instance.error('Move exception: $e', 'AlistApiClient');
+    }
+
+    return false;
+  }
+
+  // 复制文件或文件夹（批量）
+  Future<bool> copyFiles({required String srcDir, required String dstDir, required List<String> names}) async {
+    LogService.instance.info('Copying files', 'AlistApiClient', {
+      'src_dir': srcDir,
+      'dst_dir': dstDir,
+      'names': names,
+    });
+
+    if (names.isEmpty) {
+      LogService.instance.warning('Copy aborted: empty names list', 'AlistApiClient');
+      return false;
+    }
+
+    if (_token == null) {
+      final success = await login();
+      if (!success) {
+        LogService.instance.error('Login failed, cannot copy files', 'AlistApiClient');
+        return false;
+      }
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_serverUrl/api/fs/copy'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': _token!,
+        },
+        body: jsonEncode({
+          'src_dir': srcDir,
+            'dst_dir': dstDir,
+            'names': names,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['code'] == 200) {
+          LogService.instance.info('Copy success', 'AlistApiClient');
+          return true;
+        } else {
+          LogService.instance.error('Copy failed: code=${data['code']} msg=${data['message']}', 'AlistApiClient');
+        }
+      } else {
+        LogService.instance.error('Copy HTTP error: ${response.statusCode}', 'AlistApiClient', {
+          'response': response.body,
+        });
+      }
+    } catch (e) {
+      LogService.instance.error('Copy exception: $e', 'AlistApiClient');
+    }
+
+    return false;
+  }
+
   // 创建文件夹
   Future<bool> createFolder(String path) async {
     LogService.instance.info('Creating folder: $path', 'AlistApiClient');
