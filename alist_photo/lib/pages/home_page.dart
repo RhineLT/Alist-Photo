@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'dart:io';
@@ -91,12 +92,14 @@ class _HomePageState extends State<HomePage> {
         } catch (e) {
           LogService.instance.warning('Sync cache dir structure failed: $e', 'HomePage');
         }
-        // 预加载当前目录的缩略图到本地缓存
-        try {
-          await MediaCacheManager.instance.preloadThumbnails(widget.apiClient, files);
-        } catch (e) {
-          LogService.instance.warning('Preload thumbnails failed: $e', 'HomePage');
-        }
+        // 异步后台预加载（不阻塞首屏显示）
+        unawaited(Future(() async {
+          try {
+            await MediaCacheManager.instance.preloadThumbnails(widget.apiClient, files);
+          } catch (e) {
+            LogService.instance.warning('Preload thumbnails failed (background): $e', 'HomePage');
+          }
+        }));
       } else {
         LogService.instance.error('Failed to load files from path: $_currentPath', 'HomePage');
         if (mounted) {
@@ -301,10 +304,8 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('目标目录不能与源目录相同')));
       return;
     }
-    if (op == 'move' && dstDir.startsWith(srcDir.endsWith('/') ? srcDir : '$srcDir/')) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('不能将目录移动到其自身子目录')));
-      return;
-    }
+    // 由于当前 UI 只允许选择文件（目录不会进入多选集合），无需对子目录进行阻断。
+    // 如果后续允许目录参与操作，可在此加入：判断若 names 中包含某目录且 dstDir 位于该目录子树下则阻断。
     final names = List<String>.from(_pendingNames);
     setState(() { _isLoading = true; });
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((op=='copy'?'复制':'移动')+'中：${names.length} 项...')));
