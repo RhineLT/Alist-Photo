@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'dart:io';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/alist_api_client.dart';
@@ -43,6 +42,10 @@ class _HomePageState extends State<HomePage> {
   // 退出确认相关状态
   DateTime? _lastBackPressed;
   static const Duration _backPressedThreshold = Duration(seconds: 2);
+  
+  // 月份分组相关状态
+  Map<String, List<AlistFile>> _groupedFiles = {};
+  bool _enableMonthGrouping = true; // 是否启用月份分组
   
   @override
   void initState() {
@@ -86,6 +89,8 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _files = files;
         });
+        // 对文件进行月份分组
+        _groupFilesByMonth();
         // 同步缓存目录结构（当前路径与子目录）
         try {
           await MediaCacheManager.instance.syncDirectoryStructure(_currentPath, files);
@@ -122,6 +127,54 @@ class _HomePageState extends State<HomePage> {
         _isLoading = false;
       });
     }
+  }
+  
+  // 按月份对文件进行分组
+  void _groupFilesByMonth() {
+    if (!_enableMonthGrouping) {
+      _groupedFiles = {'所有文件': _files};
+      return;
+    }
+    
+    final Map<String, List<AlistFile>> grouped = {};
+    
+    // 首先添加所有目录（不分组）
+    final folders = _files.where((file) => file.isDir).toList();
+    if (folders.isNotEmpty) {
+      grouped['文件夹'] = folders;
+    }
+    
+    // 然后按月份分组文件
+    final files = _files.where((file) => !file.isDir).toList();
+    for (final file in files) {
+      final date = file.created;
+      final monthKey = '${date.year}年${date.month.toString().padLeft(2, '0')}月';
+      
+      if (!grouped.containsKey(monthKey)) {
+        grouped[monthKey] = [];
+      }
+      grouped[monthKey]!.add(file);
+    }
+    
+    // 按时间倒序排列月份（最新的在前面）
+    final sortedKeys = grouped.keys.where((key) => key != '文件夹').toList();
+    sortedKeys.sort((a, b) {
+      if (a == '文件夹') return -1;
+      if (b == '文件夹') return 1;
+      return b.compareTo(a); // 倒序排列
+    });
+    
+    _groupedFiles = {};
+    // 先添加文件夹
+    if (grouped.containsKey('文件夹')) {
+      _groupedFiles['文件夹'] = grouped['文件夹']!;
+    }
+    // 再按时间顺序添加月份分组
+    for (final key in sortedKeys) {
+      _groupedFiles[key] = grouped[key]!;
+    }
+    
+    LogService.instance.debug('Files grouped by month: ${_groupedFiles.keys.toList()}', 'HomePage');
   }
   
   Future<void> _openUploadPage() async {
@@ -308,7 +361,7 @@ class _HomePageState extends State<HomePage> {
     // 如果后续允许目录参与操作，可在此加入：判断若 names 中包含某目录且 dstDir 位于该目录子树下则阻断。
     final names = List<String>.from(_pendingNames);
     setState(() { _isLoading = true; });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((op=='copy'?'复制':'移动')+'中：${names.length} 项...')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${op=='copy'?'复制':'移动'}中：${names.length} 项...')));
     bool success = false;
     if (op == 'copy') {
       success = await widget.apiClient.copyFiles(srcDir: srcDir, dstDir: dstDir, names: names);
@@ -317,21 +370,17 @@ class _HomePageState extends State<HomePage> {
     }
     if (success) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((op=='copy'?'复制':'移动')+'成功')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${op=='copy'?'复制':'移动'}成功')));
       }
       _loadFiles(refresh: true);
     } else {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((op=='copy'?'复制':'移动')+'失败'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${op=='copy'?'复制':'移动'}失败'), backgroundColor: Colors.red));
       }
     }
     setState(() { _isLoading = false; });
     _cancelPendingOperation();
   }
-  
-  // 兼容旧调用（不再使用文本输入，而是进入目录选择模式）
-  Future<void> _performBatchCopy(String targetPath) async { _batchCopy(); }
-  Future<void> _performBatchMove(String targetPath) async { _batchMove(); }
   
   // 处理返回键逻辑
   Future<bool> _handleBackPress() async {
@@ -869,16 +918,17 @@ class _HomePageState extends State<HomePage> {
         onTap: () => _navigateToFolder(file),
         onLongPress: () => _showFileMenu(file),
         child: Card(
+          margin: EdgeInsets.zero, // 移除 Card 的默认 margin
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.folder, size: 48, color: Colors.orange),
-              const SizedBox(height: 8),
+              const Icon(Icons.folder, size: 32, color: Colors.orange), // 缩小图标
+              const SizedBox(height: 4), // 减少间距
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 4), // 减少内边距
                 child: Text(
                   file.name,
-                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12), // 缩小字体
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -902,6 +952,7 @@ class _HomePageState extends State<HomePage> {
                 _toggleFileSelection(file);
               }(),
         child: Card(
+          margin: EdgeInsets.zero, // 移除 Card 的默认 margin
           clipBehavior: Clip.antiAlias,
           child: Stack(
             children: [
@@ -960,8 +1011,8 @@ class _HomePageState extends State<HomePage> {
               // 选择状态指示器
               if (_isSelectionMode)
                 Positioned(
-                  top: 8,
-                  left: 8,
+                  top: 4,
+                  left: 4,
                   child: Container(
                     decoration: const BoxDecoration(
                       color: Colors.white,
@@ -974,65 +1025,43 @@ class _HomePageState extends State<HomePage> {
                       color: _selectedFiles.contains(file.name)
                           ? Colors.green
                           : Colors.grey,
-                      size: 24,
+                      size: 18, // 减小尺寸
                     ),
                   ),
                 ),
               
-              // 快速下载按钮 (只在非选择模式显示)
-              if (!_isSelectionMode)
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Material(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(16),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () => _downloadFile(file),
-                      child: const Padding(
-                        padding: EdgeInsets.all(6),
-                        child: Icon(
-                          Icons.download,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
               // 媒体类型指示器
               if (mediaType == 'video' && !_isSelectionMode)
                 Positioned(
-                  top: 8,
-                  right: 8,
+                  top: 4,
+                  right: 4,
                   child: Container(
-                    padding: const EdgeInsets.all(4),
+                    padding: const EdgeInsets.all(2),
                     decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(4),
+                      color: Colors.black.withAlpha((0.6 * 255).round()),
+                      borderRadius: BorderRadius.circular(3),
                     ),
                     child: const Icon(
                       Icons.play_arrow,
                       color: Colors.white,
-                      size: 16,
+                      size: 12,
                     ),
                   ),
                 ),
               if (mediaType == 'live_photo' && !_isSelectionMode)
                 Positioned(
-                  top: 8,
-                  right: 8,
+                  top: 4,
+                  right: 4,
                   child: Container(
-                    padding: const EdgeInsets.all(4),
+                    padding: const EdgeInsets.all(2),
                     decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(4),
+                      color: Colors.black.withAlpha((0.6 * 255).round()),
+                      borderRadius: BorderRadius.circular(3),
                     ),
                     child: const Icon(
                       Icons.motion_photos_on,
                       color: Colors.white,
-                      size: 16,
+                      size: 12,
                     ),
                   ),
                 ),
@@ -1044,26 +1073,27 @@ class _HomePageState extends State<HomePage> {
       return GestureDetector(
         onLongPress: () => _showFileMenu(file),
         child: Card(
+          margin: EdgeInsets.zero, // 移除 Card 的默认 margin
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.insert_drive_file, size: 48, color: Colors.grey),
-              const SizedBox(height: 8),
+              const Icon(Icons.insert_drive_file, size: 32, color: Colors.grey), // 缩小图标
+              const SizedBox(height: 4), // 减少间距
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 4), // 减少内边距
                 child: Text(
                   file.name,
-                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11), // 缩小字体
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2), // 减少间距
               Text(
                 file.formattedSize,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 10, // 缩小字体
                   color: Colors.grey.shade600,
                 ),
               ),
@@ -1184,6 +1214,17 @@ class _HomePageState extends State<HomePage> {
                         onPressed: () {
                           setState(() { _isGridView = !_isGridView; });
                         },
+                        tooltip: _isGridView ? '列表视图' : '网格视图',
+                      ),
+                      IconButton(
+                        icon: Icon(_enableMonthGrouping ? Icons.calendar_view_month : Icons.view_agenda),
+                        onPressed: () {
+                          setState(() { 
+                            _enableMonthGrouping = !_enableMonthGrouping;
+                            _groupFilesByMonth(); // 重新分组
+                          });
+                        },
+                        tooltip: _enableMonthGrouping ? '取消月份分组' : '按月份分组',
                       ),
                       IconButton(
                         icon: const Icon(Icons.settings),
@@ -1241,13 +1282,7 @@ class _HomePageState extends State<HomePage> {
                     : RefreshIndicator(
                         onRefresh: () => _loadFiles(refresh: true),
                         child: _isGridView
-                            ? MasonryGridView.count(
-                                crossAxisCount: 2,
-                                padding: const EdgeInsets.all(8),
-                                itemCount: _files.length,
-                                itemBuilder: (context, index) =>
-                                    _buildFileGridItem(_files[index], index),
-                              )
+                            ? _buildGroupedGridView()
                             : ListView.builder(
                                 itemCount: _files.length,
                                 itemBuilder: (context, index) =>
@@ -1258,6 +1293,72 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     ),
+    );
+  }
+  
+  // 构建按月份分组的网格视图
+  Widget _buildGroupedGridView() {
+    if (_groupedFiles.isEmpty) {
+      return const Center(child: Text('没有文件'));
+    }
+    
+    return ListView.builder(
+      padding: const EdgeInsets.all(4),
+      itemCount: _groupedFiles.length,
+      itemBuilder: (context, groupIndex) {
+        final groupName = _groupedFiles.keys.elementAt(groupIndex);
+        final groupFiles = _groupedFiles[groupName]!;
+        
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 月份标题
+            if (groupName != '所有文件')
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                child: Row(
+                  children: [
+                    Text(
+                      groupName,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${groupFiles.length} 项',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            // 该月份的文件网格
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                crossAxisSpacing: 2,
+                mainAxisSpacing: 2,
+                childAspectRatio: 1,
+              ),
+              itemCount: groupFiles.length,
+              itemBuilder: (context, fileIndex) {
+                final file = groupFiles[fileIndex];
+                // 计算在整个文件列表中的索引（用于媒体查看器）
+                final globalIndex = _files.indexOf(file);
+                return _buildFileGridItem(file, globalIndex);
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
+      },
     );
   }
 }
