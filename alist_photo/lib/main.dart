@@ -37,13 +37,20 @@ class _MyAppState extends State<MyApp> {
   Future<void> _initializeApp() async {
     try {
       LogService.instance.info('Initializing Alist API client', 'Main');
-      // 先检查/请求存储权限（Android <= 29 需要；>=30 写 app-scoped 目录不强制，但这里统一 gating）
+      
+      // iOS 不需要显式请求存储权限（文件访问权限通过系统选择器自动处理）
+      // Android 才需要请求存储权限
       bool granted = true;
       if (Platform.isAndroid) {
-        final status = await Permission.storage.status;
-        if (!status.isGranted) {
-          final req = await Permission.storage.request();
-          granted = req.isGranted;
+        try {
+          final status = await Permission.storage.status;
+          if (!status.isGranted) {
+            final req = await Permission.storage.request();
+            granted = req.isGranted;
+          }
+        } catch (e) {
+          LogService.instance.warning('Failed to check storage permission: $e', 'Main');
+          // 即使权限检查失败也继续初始化
         }
       }
 
@@ -51,8 +58,10 @@ class _MyAppState extends State<MyApp> {
         LogService.instance.warning('Storage permission not granted. App will request again later.', 'Main');
       }
 
+      // 初始化 API 客户端
       await _apiClient.initialize();
-      // 初始化外部文件缓存（内部也会最小化处理权限）
+      
+      // 初始化媒体缓存管理器
       await MediaCacheManager.instance.initialize();
       
       setState(() {
@@ -60,10 +69,11 @@ class _MyAppState extends State<MyApp> {
       });
       
       LogService.instance.info('App initialization completed', 'Main');
-    } catch (e) {
-      LogService.instance.error('App initialization failed: $e', 'Main');
+    } catch (e, stackTrace) {
+      LogService.instance.error('App initialization failed: $e\n$stackTrace', 'Main');
+      // 即使初始化失败也要继续，让用户可以看到界面
       setState(() {
-        _isInitialized = true; // 继续加载，即使初始化失败
+        _isInitialized = true;
       });
     }
   }
