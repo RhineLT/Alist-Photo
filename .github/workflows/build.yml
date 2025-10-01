@@ -122,29 +122,22 @@ jobs:
       working-directory: ./alist_photo
       run: flutter build ios --release --no-codesign
     
-    - name: Create IPA
-      working-directory: ./alist_photo
-      run: flutter build ipa --release --no-codesign --export-options-plist=ios/ExportOptions.plist
-      continue-on-error: true
+    - name: Create IPA directory
+      run: mkdir -p alist_photo/build/ios/ipa
     
-    - name: Create Runner.app archive
+    - name: Package Runner.app to IPA
       working-directory: ./alist_photo
       run: |
-        cd build/ios/iphoneos
-        zip -r Runner.app.zip Runner.app
+        mkdir -p Payload
+        cp -r build/ios/iphoneos/Runner.app Payload/
+        zip -r build/ios/ipa/AlistPhoto.ipa Payload
+        rm -rf Payload
     
-    - name: Upload iOS Runner.app
-      uses: actions/upload-artifact@v4
-      with:
-        name: ios-app
-        path: alist_photo/build/ios/iphoneos/Runner.app.zip
-    
-    - name: Upload IPA if exists
+    - name: Upload iOS IPA artifact
       uses: actions/upload-artifact@v4
       with:
         name: ios-ipa
         path: alist_photo/build/ios/ipa/*.ipa
-      continue-on-error: true
 
   create-release:
     if: github.ref == 'refs/heads/main'
@@ -181,18 +174,18 @@ jobs:
           name: android-aab
           path: ./artifacts/
           
-      - name: Download iOS App
-        uses: actions/download-artifact@v4
-        with:
-          name: ios-app
-          path: ./artifacts/
-      
       - name: Download iOS IPA
         uses: actions/download-artifact@v4
         with:
           name: ios-ipa
           path: ./artifacts/
-        continue-on-error: true
+      
+      - name: Rename artifacts
+        run: |
+          cd artifacts
+          mv app-release.apk AlistPhoto-${{ steps.version.outputs.VERSION }}.apk || true
+          mv app-release.aab AlistPhoto-${{ steps.version.outputs.VERSION }}.aab || true
+          ls -lah
         
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -206,6 +199,5 @@ jobs:
             ./artifacts/*.apk
             ./artifacts/*.aab
             ./artifacts/*.ipa
-            ./artifacts/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

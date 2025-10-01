@@ -50,20 +50,22 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
-	<!-- Camera and Photo Library Permissions -->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>需要访问您的相册以选择和上传照片</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>需要访问您的相册以保存照片</string>
+	<!-- Camera and Photo Library permissions -->
 	<key>NSCameraUsageDescription</key>
-	<string>需要访问相机以拍摄照片</string>
-	<!-- Microphone Permission for video recording -->
+	<string>需要访问相机以拍摄照片和视频</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>需要访问相册以选择照片和视频</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>需要保存照片和视频到相册</string>
+	<!-- Microphone permission for video recording -->
 	<key>NSMicrophoneUsageDescription</key>
 	<string>需要访问麦克风以录制视频</string>
-	<!-- File Access Permission -->
+	<!-- File access permissions -->
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UISupportsDocumentBrowser</key>
 	<true/>
 </dict>
 </plist>
