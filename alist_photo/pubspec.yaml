@@ -82,6 +82,9 @@ dependencies:
   path: ^1.9.0
   intl: ^0.19.0
   
+  # For opening files and directories
+  open_filex: ^4.5.0
+  
   # For Live Photo support
   flutter_plugin_android_lifecycle: ^2.0.23
 

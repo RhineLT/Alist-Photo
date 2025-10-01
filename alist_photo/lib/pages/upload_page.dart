@@ -59,13 +59,47 @@ class _UploadPageState extends State<UploadPage> {
                     _uploadService.clearCompletedTasks();
                   });
                   break;
+                case 'retry_failed':
+                  _confirmRetryFailed();
+                  break;
+                case 'clear_all':
+                  _confirmClearAll();
+                  break;
               }
             },
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: 'clear_completed',
-                child: Text('清除已完成'),
+                child: Row(
+                  children: [
+                    Icon(Icons.cleaning_services, size: 20),
+                    SizedBox(width: 8),
+                    Text('清除已完成'),
+                  ],
+                ),
               ),
+              if (_uploadService.failedCount > 0)
+                const PopupMenuItem(
+                  value: 'retry_failed',
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh, size: 20),
+                      SizedBox(width: 8),
+                      Text('重试失败项'),
+                    ],
+                  ),
+                ),
+              if (_uploadService.uploadTasks.isNotEmpty)
+                const PopupMenuItem(
+                  value: 'clear_all',
+                  child: Row(
+                    children: [
+                      Icon(Icons.clear_all, size: 20, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('清除所有任务', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
             ],
           ),
         ],
@@ -377,6 +411,66 @@ class _UploadPageState extends State<UploadPage> {
               });
             },
             child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _confirmRetryFailed() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('重试失败项'),
+        content: Text('确定要重试 ${_uploadService.failedCount} 个失败的上传任务吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _uploadService.retryFailedUploads();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('已重新开始 ${_uploadService.failedCount} 个失败任务'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            },
+            child: const Text('重试'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _confirmClearAll() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('清除所有任务'),
+        content: const Text('确定要清除所有上传任务吗？\n\n正在上传的任务将被取消，所有任务将被移除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              final taskCount = _uploadService.uploadTasks.length;
+              _uploadService.clearAllTasks();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('已清除 $taskCount 个上传任务'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('清除'),
           ),
         ],
       ),

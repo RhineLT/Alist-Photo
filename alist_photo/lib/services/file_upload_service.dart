@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'alist_api_client.dart';
 import 'log_service.dart';
 
@@ -33,7 +35,43 @@ class UploadTask {
     this.progress = 0.0,
     this.error,
     this.retryCount = 0,
-  }) : createdAt = DateTime.now();
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
+  
+  // 序列化到JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'fileName': fileName,
+      'filePath': filePath,
+      'targetPath': targetPath,
+      'fileSize': fileSize,
+      'status': status.index,
+      'progress': progress,
+      'error': error,
+      'retryCount': retryCount,
+      'createdAt': createdAt.toIso8601String(),
+      'startedAt': startedAt?.toIso8601String(),
+      'completedAt': completedAt?.toIso8601String(),
+    };
+  }
+  
+  // 从JSON反序列化
+  factory UploadTask.fromJson(Map<String, dynamic> json) {
+    return UploadTask(
+      id: json['id'],
+      fileName: json['fileName'],
+      filePath: json['filePath'],
+      targetPath: json['targetPath'],
+      fileSize: json['fileSize'],
+      status: UploadStatus.values[json['status']],
+      progress: json['progress'] ?? 0.0,
+      error: json['error'],
+      retryCount: json['retryCount'] ?? 0,
+      createdAt: DateTime.parse(json['createdAt']),
+    )..startedAt = json['startedAt'] != null ? DateTime.parse(json['startedAt']) : null
+     ..completedAt = json['completedAt'] != null ? DateTime.parse(json['completedAt']) : null;
+  }
   
   String get formattedSize {
     if (fileSize < 1024) return '${fileSize}B';
@@ -64,12 +102,16 @@ class FileUploadService extends ChangeNotifier {
   static const int maxRetries = 3;
   static const int maxConcurrentUploads = 3;
   static const int chunkSize = 1024 * 1024; // 1MB chunks for large files
+  static const String _tasksKey = 'upload_tasks';
   
   final AlistApiClient _apiClient;
   final List<UploadTask> _uploadTasks = [];
   int _activeUploads = 0;
+  bool _isInitialized = false;
   
-  FileUploadService(this._apiClient);
+  FileUploadService(this._apiClient) {
+    _loadTasks();
+  }
   
   List<UploadTask> get uploadTasks => List.unmodifiable(_uploadTasks);
   
@@ -125,6 +167,7 @@ class FileUploadService extends ChangeNotifier {
       'target_path': targetPath,
     });
     
+    _saveTasks();
     notifyListeners();
     // 添加任务后尝试启动（如果并发未满）
     _processQueue();
@@ -195,6 +238,7 @@ class FileUploadService extends ChangeNotifier {
       }
     } finally {
       _activeUploads--;
+      _saveTasks();
       notifyListeners();
       
       // 启动下一个待上传的任务
@@ -259,6 +303,7 @@ class FileUploadService extends ChangeNotifier {
       if (response.statusCode == 200) {
         task.status = UploadStatus.completed;
         task.progress = 1.0;
+        _saveTasks();
         LogService.instance.info('Upload completed: ${task.fileName}', 'FileUploadService');
       } else {
         throw Exception('Upload failed with status: ${response.statusCode}');
@@ -282,6 +327,7 @@ class FileUploadService extends ChangeNotifier {
       task.cancelToken?.cancel();
       task.status = UploadStatus.paused;
       _activeUploads--;
+      _saveTasks();
       notifyListeners();
       LogService.instance.info('Upload paused: ${task.fileName}', 'FileUploadService');
       
@@ -312,6 +358,7 @@ class FileUploadService extends ChangeNotifier {
     
     task.cancelToken?.cancel();
     task.status = UploadStatus.cancelled;
+    _saveTasks();
     notifyListeners();
     LogService.instance.info('Upload cancelled: ${task.fileName}', 'FileUploadService');
     
@@ -330,6 +377,7 @@ class FileUploadService extends ChangeNotifier {
     }
     
     _uploadTasks.removeAt(taskIndex);
+    _saveTasks();
     notifyListeners();
     
     // 处理队列中的下一个任务
@@ -341,6 +389,7 @@ class FileUploadService extends ChangeNotifier {
       t.status == UploadStatus.completed || 
       t.status == UploadStatus.cancelled
     );
+    _saveTasks();
     notifyListeners();
   }
   
@@ -395,7 +444,26 @@ class FileUploadService extends ChangeNotifier {
       task.progress = 0.0;
     }
     
+    _saveTasks();
     startAllUploads();
+  }
+  
+  void clearAllTasks() {
+    // 取消所有正在上传的任务
+    final uploadingTasks = _uploadTasks.where((t) => 
+      t.status == UploadStatus.uploading
+    ).toList();
+    
+    for (final task in uploadingTasks) {
+      task.cancelToken?.cancel();
+    }
+    
+    _activeUploads = 0;
+    _uploadTasks.clear();
+    _saveTasks();
+    notifyListeners();
+    
+    LogService.instance.info('All upload tasks cleared', 'FileUploadService');
   }
   
   // 获取总的上传进度
@@ -407,5 +475,79 @@ class FileUploadService extends ChangeNotifier {
     
     final uploadedSize = _uploadTasks.fold<double>(0, (sum, task) => sum + (task.fileSize * task.progress));
     return uploadedSize / totalSize;
+  }
+  
+  // 加载持久化的任务
+  Future<void> _loadTasks() async {
+    if (_isInitialized) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final tasksJson = prefs.getString(_tasksKey);
+      
+      if (tasksJson != null) {
+        final List<dynamic> tasksList = json.decode(tasksJson);
+        
+        for (final taskJson in tasksList) {
+          try {
+            final task = UploadTask.fromJson(taskJson);
+            
+            // 检查文件是否还存在
+            final file = File(task.filePath);
+            if (await file.exists()) {
+              // 重置上传中的任务为待上传
+              if (task.status == UploadStatus.uploading) {
+                task.status = UploadStatus.pending;
+                task.progress = 0.0;
+              }
+              
+              // 跳过已完成和已取消的任务
+              if (task.status != UploadStatus.completed && 
+                  task.status != UploadStatus.cancelled) {
+                _uploadTasks.add(task);
+              }
+            } else {
+              LogService.instance.warning('Skipping task, file not found: ${task.filePath}', 'FileUploadService');
+            }
+          } catch (e) {
+            LogService.instance.error('Failed to load task: $e', 'FileUploadService');
+          }
+        }
+        
+        LogService.instance.info('Loaded ${_uploadTasks.length} tasks from storage', 'FileUploadService');
+      }
+    } catch (e) {
+      LogService.instance.error('Failed to load tasks: $e', 'FileUploadService');
+    } finally {
+      _isInitialized = true;
+      notifyListeners();
+      
+      // 自动恢复上传
+      if (_uploadTasks.any((t) => t.status == UploadStatus.pending)) {
+        LogService.instance.info('Auto-resuming pending uploads', 'FileUploadService');
+        _processQueue();
+      }
+    }
+  }
+  
+  // 保存任务到本地存储
+  Future<void> _saveTasks() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // 只保存未完成和未取消的任务
+      final tasksToSave = _uploadTasks.where((t) => 
+        t.status != UploadStatus.completed && 
+        t.status != UploadStatus.cancelled
+      ).toList();
+      
+      final tasksList = tasksToSave.map((task) => task.toJson()).toList();
+      final tasksJson = json.encode(tasksList);
+      
+      await prefs.setString(_tasksKey, tasksJson);
+      LogService.instance.debug('Saved ${tasksToSave.length} tasks to storage', 'FileUploadService');
+    } catch (e) {
+      LogService.instance.error('Failed to save tasks: $e', 'FileUploadService');
+    }
   }
 }

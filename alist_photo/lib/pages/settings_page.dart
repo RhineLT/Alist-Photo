@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import '../services/media_cache_manager.dart';
+import '../services/file_download_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/alist_api_client.dart';
 import '../services/log_service.dart';
 import 'log_viewer_page.dart';
+import 'package:open_filex/open_filex.dart';
+import 'dart:io';
 
 class SettingsPage extends StatefulWidget {
   final AlistApiClient apiClient;
@@ -26,12 +29,16 @@ class _SettingsPageState extends State<SettingsPage> {
   double _cacheSize = 1.0; // GB
   String _cacheUsage = '计算中...';
   
+  // 下载设置
+  String _downloadPath = '加载中...';
+  
   @override
   void initState() {
     super.initState();
     _loadCurrentSettings();
     _loadCacheSettings();
     _calculateCacheUsage();
+    _loadDownloadPath();
   }
   
   void _loadCurrentSettings() {
@@ -210,6 +217,180 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
   }
+  
+  Future<void> _loadDownloadPath() async {
+    try {
+      final path = await FileDownloadService.instance.getDownloadDirectory();
+      setState(() {
+        _downloadPath = path;
+      });
+    } catch (e) {
+      LogService.instance.error('Failed to load download path: $e', 'SettingsPage');
+      setState(() {
+        _downloadPath = '加载失败';
+      });
+    }
+  }
+  
+  Future<void> _changeDownloadPath() async {
+    final controller = TextEditingController(text: _downloadPath);
+    
+    final newPath = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('修改下载路径'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('请输入新的下载路径：', style: TextStyle(fontSize: 14)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                hintText: '/storage/emulated/0/Download/AlistPhoto',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              Platform.isAndroid 
+                ? '提示：Android 建议使用 /storage/emulated/0/Download/ 或 /storage/emulated/0/Documents/ 下的路径'
+                : '提示：请使用应用有权限访问的路径',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              // 重置为默认路径
+              await FileDownloadService.instance.resetDownloadDirectory();
+              Navigator.of(context).pop('reset');
+            },
+            child: const Text('重置为默认'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(controller.text.trim());
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    
+    if (newPath != null && newPath.isNotEmpty && mounted) {
+      if (newPath == 'reset') {
+        await _loadDownloadPath();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('下载路径已重置为默认'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        return;
+      }
+      
+      final success = await FileDownloadService.instance.setDownloadDirectory(newPath);
+      
+      if (success) {
+        await _loadDownloadPath();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('下载路径修改成功'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('下载路径修改失败，请检查路径是否有效以及是否有写入权限'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    }
+    
+    controller.dispose();
+  }
+  
+  Future<void> _openDownloadFolder() async {
+    try {
+      final path = await FileDownloadService.instance.getDownloadDirectory();
+      
+      // 确保目录存在
+      final directory = Directory(path);
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+      
+      // 在 Android 上打开文件管理器
+      if (Platform.isAndroid) {
+        // 尝试创建一个临时文件来触发文件管理器
+        final result = await OpenFilex.open(path);
+        
+        if (result.type != ResultType.done) {
+          // 如果直接打开目录失败，显示路径信息
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('下载路径'),
+                content: SelectableText(
+                  '下载文件保存在：\n\n$path\n\n请使用文件管理器手动打开该路径。',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('确定'),
+                  ),
+                ],
+              ),
+            );
+          }
+        }
+      } else {
+        // iOS 显示路径信息
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('下载路径'),
+              content: SelectableText('下载文件保存在：\n\n$path'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('确定'),
+                ),
+              ],
+            ),
+          );
+        }
+      }
+      
+      LogService.instance.info('Opened download folder: $path', 'SettingsPage');
+    } catch (e) {
+      LogService.instance.error('Failed to open download folder: $e', 'SettingsPage');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('打开下载文件夹失败：$e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -258,6 +439,10 @@ class _SettingsPageState extends State<SettingsPage> {
             
             // 缓存管理
             _buildCacheManagementSection(),
+            const SizedBox(height: 32),
+            
+            // 下载管理
+            _buildDownloadManagementSection(),
             const SizedBox(height: 32),
             
             // 系统信息
@@ -484,6 +669,96 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildDownloadManagementSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.download_outlined, color: Colors.orange.shade700),
+                const SizedBox(width: 8),
+                Text(
+                  '下载管理',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange.shade700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: const Text('下载路径'),
+              subtitle: Text(
+                _downloadPath,
+                style: const TextStyle(fontSize: 12),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _changeDownloadPath,
+            ),
+            const Divider(),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _openDownloadFolder,
+                    icon: const Icon(Icons.folder_open),
+                    label: const Text('打开下载文件夹'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.orange.shade700, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        '说明',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '• 下载的照片和视频将保存到此路径\n'
+                    '• 点击路径可以修改下载位置\n'
+                    '• 点击按钮可直接打开文件管理器查看文件',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

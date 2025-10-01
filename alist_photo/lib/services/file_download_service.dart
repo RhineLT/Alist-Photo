@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'log_service.dart';
 
 class FileDownloadService {
@@ -11,6 +12,7 @@ class FileDownloadService {
   FileDownloadService._internal();
 
   static FileDownloadService get instance => _instance;
+  static const String _downloadPathKey = 'download_path';
 
   final Dio _dio = Dio();
 
@@ -73,26 +75,70 @@ class FileDownloadService {
     return 0;
   }
 
-  // 获取下载目录
-  Future<String> getDownloadDirectory() async {
+  // 获取默认下载目录
+  Future<String> _getDefaultDownloadDirectory() async {
     if (Platform.isAndroid) {
       // Android 使用公共下载目录
-      final directory = Directory('/storage/emulated/0/Download/AlistPhoto');
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-        LogService.instance.info('Created download directory: ${directory.path}', 'FileDownloadService');
-      }
-      return directory.path;
+      return '/storage/emulated/0/Download/AlistPhoto';
     } else {
       // iOS 使用应用文档目录
       final directory = await getApplicationDocumentsDirectory();
-      final downloadDir = Directory('${directory.path}/Downloads');
-      if (!await downloadDir.exists()) {
-        await downloadDir.create(recursive: true);
-        LogService.instance.info('Created download directory: ${downloadDir.path}', 'FileDownloadService');
-      }
-      return downloadDir.path;
+      return '${directory.path}/Downloads';
     }
+  }
+  
+  // 获取下载目录（从设置中读取或使用默认值）
+  Future<String> getDownloadDirectory() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? customPath = prefs.getString(_downloadPathKey);
+    
+    if (customPath == null || customPath.isEmpty) {
+      customPath = await _getDefaultDownloadDirectory();
+    }
+    
+    // 确保目录存在
+    final directory = Directory(customPath);
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+      LogService.instance.info('Created download directory: ${directory.path}', 'FileDownloadService');
+    }
+    
+    return directory.path;
+  }
+  
+  // 设置自定义下载路径
+  Future<bool> setDownloadDirectory(String path) async {
+    try {
+      // 验证路径
+      final directory = Directory(path);
+      
+      // 尝试创建目录
+      if (!await directory.exists()) {
+        await directory.create(recursive: true);
+      }
+      
+      // 测试是否有写入权限
+      final testFile = File('${directory.path}/.test');
+      await testFile.writeAsString('test');
+      await testFile.delete();
+      
+      // 保存路径
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_downloadPathKey, path);
+      
+      LogService.instance.info('Download directory set to: $path', 'FileDownloadService');
+      return true;
+    } catch (e) {
+      LogService.instance.error('Failed to set download directory: $e', 'FileDownloadService');
+      return false;
+    }
+  }
+  
+  // 重置为默认下载路径
+  Future<void> resetDownloadDirectory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_downloadPathKey);
+    LogService.instance.info('Download directory reset to default', 'FileDownloadService');
   }
 
   // 下载文件
